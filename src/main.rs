@@ -28,6 +28,11 @@ struct Args {
     #[arg(short, long)]
     ratio: Option<f32>,
 
+    /// Select sentences up to this many words instead of a sentence count
+    /// (context sentences pulled in for readability are extra)
+    #[arg(short, long, conflicts_with_all = ["sentences", "ratio"])]
+    words: Option<usize>,
+
     /// Folder with config.json, tokenizer.json and model.safetensors
     /// [default: $DISTILL_MODEL, ./model, <binary folder>/model, ~/.distill/model]
     #[arg(short, long)]
@@ -201,6 +206,7 @@ fn run() -> Result<()> {
 
     let params = select::Params {
         budget,
+        word_budget: args.words,
         lambda: args.lambda.clamp(0.0, 1.0),
         lead: args.lead,
         centrality: args.centrality,
@@ -323,7 +329,7 @@ fn print_text(doc: &segment::Document, sel: &select::Selection, headings: bool) 
 /// Embeddings are a pure function of the sentence text, so they can be reused.
 /// Set DISTILL_CACHE to a folder to skip re-embedding an unchanged document.
 fn embed_cached(embedder: &embed::Embedder, texts: &[&str], batch_size: usize) -> Result<Vec<Vec<f32>>> {
-    let Some(dir) = std::env::var_os("DISTILL_CACHE").map(PathBuf::from) else {
+    let Some(dir) = std::env::var_os("DISTILL_CACHE").filter(|d| !d.is_empty()).map(PathBuf::from) else {
         return embedder.embed(texts, batch_size);
     };
     // FNV-1a over all sentence texts.
@@ -339,7 +345,7 @@ fn embed_cached(embedder: &embed::Embedder, texts: &[&str], batch_size: usize) -
         let n = texts.len();
         if n > 0 && bytes.len() % (4 * n) == 0 {
             let dim = bytes.len() / (4 * n);
-            let flat: Vec<f32> = bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+            let flat: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
             return Ok(flat.chunks(dim).map(|c| c.to_vec()).collect());
         }
     }

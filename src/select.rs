@@ -14,7 +14,7 @@
 use crate::embed::{dot, normalize};
 use crate::segment::Document;
 use regex::Regex;
-use std::collections::BTreeMap;
+use std::collections::btree_map::{BTreeMap, Entry};
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -28,7 +28,11 @@ pub enum Centrality {
 #[derive(Debug, Clone)]
 pub struct Params {
     /// Number of sentences to select (before context sentences are added).
+    /// Ignored when `word_budget` is set.
     pub budget: usize,
+    /// Select sentences up to this many words instead of `budget` sentences
+    /// (context sentences added by repair are not counted).
+    pub word_budget: Option<usize>,
     /// MMR trade-off: 1.0 = relevance only, 0.0 = diversity only.
     pub lambda: f32,
     pub centrality: Centrality,
@@ -54,6 +58,7 @@ impl Default for Params {
     fn default() -> Self {
         Self {
             budget: 5,
+            word_budget: None,
             lambda: 0.7,
             centrality: Centrality::Directed,
             backward: 0.3,
@@ -182,7 +187,7 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
     let (group_of_section, group_titles) = group_sections(doc);
     let cand: Vec<usize> = doc.sentences.iter().filter(|s| s.candidate).map(|s| s.index).collect();
     assert_eq!(cand.len(), embeddings.len());
-    if cand.is_empty() || p.budget == 0 {
+    if cand.is_empty() || p.word_budget.unwrap_or(p.budget) == 0 {
         return Selection { picks: Vec::new(), groups: group_titles };
     }
     let n = cand.len();
@@ -286,7 +291,22 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
 
     // Per-section share of the budget. Sub-linear weighting keeps a long
     // section from crowding out short but important ones.
+    //
+    // A pick costs 1 under a sentence budget and its word count under a word
+    // budget; quotas, caps and the overall limit are all in that unit. With a
+    // cost of 1 the arithmetic below is exactly integer sentence counting.
+    let words_of = |ci: usize| doc.sentences[cand[ci]].words as f64;
+    let cost = |ci: usize| -> f64 {
+        match p.word_budget {
+            Some(_) => words_of(ci),
+            None => 1.0,
+        }
+    };
     let budget = p.budget.min(n);
+    let limit: f64 = match p.word_budget {
+        Some(w) => w as f64,
+        None => budget as f64,
+    };
     let first_real_group = (0..n_groups).find(|&g| members[g].len() >= 2);
     let weights: Vec<f64> = (0..n_groups)
         .map(|g| {
@@ -299,26 +319,42 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         })
         .collect();
     let total: f64 = weights.iter().sum();
-    let quota: Vec<f64> = weights.iter().map(|w| budget as f64 * w / total.max(1e-9)).collect();
-    let floor: Vec<usize> = (0..n_groups).map(|g| (quota[g].floor() as usize).min(members[g].len())).collect();
-    let cap: Vec<usize> = (0..n_groups)
-        .map(|g| (quota[g].ceil() as usize).max(1).min(members[g].len()))
-        .collect();
+    let quota: Vec<f64> = weights.iter().map(|w| limit * w / total.max(1e-9)).collect();
+    // `floor`: share every section is guaranteed. `cap`: most a section may take
+    // before the remainder goes elsewhere. Under a sentence budget these are the
+    // rounded-down and rounded-up quotas; under a word budget a section may run
+    // over its quota by about one average sentence.
+    let avg_words = (0..n).map(words_of).sum::<f64>() / n as f64;
+    let (floor, cap): (Vec<f64>, Vec<f64>) = (0..n_groups)
+        .map(|g| match p.word_budget {
+            Some(_) => (quota[g], quota[g] + avg_words),
+            None => {
+                let m = members[g].len();
+                ((quota[g].floor() as usize).min(m) as f64, (quota[g].ceil() as usize).max(1).min(m) as f64)
+            }
+        })
+        .unzip();
 
+    struct Fill {
+        /// Budget spent per section.
+        used: Vec<f64>,
+        /// Budget spent overall.
+        total: f64,
+    }
+    let mut fill = Fill { used: vec![0.0; n_groups], total: 0.0 };
     let mut picked: Vec<usize> = Vec::with_capacity(budget); // candidate indices, in pick order
     let mut taken = vec![false; n];
-    let mut per_group = vec![0usize; n_groups];
     let mut max_sim = vec![0f32; n]; // similarity to the closest already-picked sentence
 
-    let pick_best = |allowed: &dyn Fn(usize, &[usize]) -> bool,
+    let pick_best = |allowed: &dyn Fn(usize, &Fill) -> bool,
                      picked: &mut Vec<usize>,
                      taken: &mut Vec<bool>,
-                     per_group: &mut Vec<usize>,
+                     fill: &mut Fill,
                      max_sim: &mut Vec<f32>|
      -> bool {
         let mut best: Option<(usize, f32)> = None;
         for ci in 0..n {
-            if taken[ci] || !allowed(group[ci], per_group) {
+            if taken[ci] || !allowed(ci, fill) {
                 continue;
             }
             let score = p.lambda * rel[ci] - (1.0 - p.lambda) * max_sim[ci];
@@ -330,7 +366,8 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         match best {
             Some((ci, _)) => {
                 taken[ci] = true;
-                per_group[group[ci]] += 1;
+                fill.used[group[ci]] += cost(ci);
+                fill.total += cost(ci);
                 for other in 0..n {
                     if !taken[other] {
                         let s = sim(ci, other);
@@ -345,31 +382,21 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
             None => false,
         }
     };
+    let fits = |ci: usize, f: &Fill| f.total + cost(ci) <= limit;
 
     // Phase 1: every section gets its guaranteed share.
-    for g in 0..n_groups {
-        for _ in 0..floor[g] {
-            if picked.len() >= budget {
-                break;
-            }
-            let only = move |x: usize, _: &[usize]| x == g;
-            pick_best(&only, &mut picked, &mut taken, &mut per_group, &mut max_sim);
-        }
+    for (g, &share) in floor.iter().enumerate() {
+        let in_share = |ci: usize, f: &Fill| group[ci] == g && f.used[g] + cost(ci) <= share && fits(ci, f);
+        while pick_best(&in_share, &mut picked, &mut taken, &mut fill, &mut max_sim) {}
     }
     // Phase 2: the remainder goes wherever the best sentences are, up to each section's cap.
-    while picked.len() < budget {
-        let cap_ref = &cap;
-        let under_cap = move |x: usize, per: &[usize]| per[x] < cap_ref[x];
-        if !pick_best(&under_cap, &mut picked, &mut taken, &mut per_group, &mut max_sim) {
-            break;
-        }
-    }
+    let under_cap = |ci: usize, f: &Fill| f.used[group[ci]] + cost(ci) <= cap[group[ci]] && fits(ci, f);
+    while pick_best(&under_cap, &mut picked, &mut taken, &mut fill, &mut max_sim) {}
     // Phase 3: if the caps left budget unused (tiny sections), fill from anywhere.
-    while picked.len() < budget {
-        let any = |_: usize, _: &[usize]| true;
-        if !pick_best(&any, &mut picked, &mut taken, &mut per_group, &mut max_sim) {
-            break;
-        }
+    while pick_best(&fits, &mut picked, &mut taken, &mut fill, &mut max_sim) {}
+    // A word budget shorter than every sentence still yields one sentence.
+    if picked.is_empty() {
+        pick_best(&|_, _| true, &mut picked, &mut taken, &mut fill, &mut max_sim);
     }
 
     let sentence_group = |si: usize| group_of_section[doc.sentences[si].section];
@@ -382,7 +409,7 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
     }
 
     if p.repair {
-        let max_extra = (budget + 1) / 2;
+        let max_extra = picked.len().div_ceil(2);
         let mut extra = 0usize;
         for (rank, &ci) in picked.iter().enumerate() {
             let mut cur = cand[ci];
@@ -392,12 +419,9 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
                 // Not counted against the cap: an item without its lead-in is unreadable.
                 for _ in 0..3 {
                     let Some(lead) = doc.sentences[cur].lead_in else { break };
-                    if !picks.contains_key(&lead) {
-                        picks.insert(
-                            lead,
-                            Pick { index: lead, kind: Kind::Context, score: 0.0, rank, group: sentence_group(lead) },
-                        );
-                    }
+                    picks
+                        .entry(lead)
+                        .or_insert(Pick { index: lead, kind: Kind::Context, score: 0.0, rank, group: sentence_group(lead) });
                     cur = lead;
                 }
                 continue;
@@ -411,11 +435,8 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
                 if doc.sentences[prev].section != doc.sentences[cur].section {
                     break;
                 }
-                if !picks.contains_key(&prev) {
-                    picks.insert(
-                        prev,
-                        Pick { index: prev, kind: Kind::Context, score: 0.0, rank, group: sentence_group(prev) },
-                    );
+                if let Entry::Vacant(slot) = picks.entry(prev) {
+                    slot.insert(Pick { index: prev, kind: Kind::Context, score: 0.0, rank, group: sentence_group(prev) });
                     extra += 1;
                 }
                 cur = prev;
@@ -554,5 +575,29 @@ mod tests {
         let ib: Vec<usize> = b.picks.iter().map(|x| x.index).collect();
         assert_eq!(ia, ib);
         assert!(!(ia.contains(&0) && ia.contains(&1)), "near-duplicates both picked: {ia:?}");
+    }
+
+    #[test]
+    fn word_budget() {
+        let doc = crate::segment::parse(
+            "Alpha beta gamma delta epsilon zeta eta. Completely different words appear in this one here today. Yet another unrelated sentence about something else entirely now. A fourth sentence that is quite a lot longer than all of the others put together here.",
+            &crate::segment::ParseOptions::default(),
+        );
+        let mut e = vec![vec![1.0, 0.1, 0.0, 0.0], vec![0.1, 1.0, 0.0, 0.0], vec![0.0, 0.1, 1.0, 0.0], vec![0.0, 0.0, 0.1, 1.0]];
+        for v in e.iter_mut() {
+            normalize(v);
+        }
+        let words = |sel: &Selection| sel.picks.iter().map(|x| doc.sentences[x.index].words).sum::<usize>();
+        for w in [8, 20, 30] {
+            let sel = select(&doc, &e, &Params { word_budget: Some(w), repair: false, ..Default::default() });
+            assert!(!sel.picks.is_empty());
+            assert!(words(&sel) <= w, "budget {w}, got {} words", words(&sel));
+        }
+        // Shorter than any sentence: still one sentence.
+        let sel = select(&doc, &e, &Params { word_budget: Some(2), repair: false, ..Default::default() });
+        assert_eq!(sel.picks.len(), 1);
+        // Large enough for everything.
+        let sel = select(&doc, &e, &Params { word_budget: Some(1000), repair: false, ..Default::default() });
+        assert_eq!(sel.picks.len(), 4);
     }
 }

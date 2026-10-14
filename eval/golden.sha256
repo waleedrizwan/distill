@@ -1,0 +1,10 @@
+9d6708f855f0f8046f4438922aa1b90617fb6b8d381b75d05b0684efbb6831e4  samples/apache-license.txt (defaults)
+f0ebc5b500723ae347fc63ad6504e8b7a3c960407cea7b1d449b44b8f6c719aa  samples/apache-license.txt -n 3
+6079b2f59c8c9bafac530bbf114968c0be00ddf35fcc4498045c830e2da30641  samples/apache-license.txt --words 150
+bfd52172e000c2d90d2f4fb4f794ababfbdeba94b9e8463aa2be65e5e64c2852  samples/apache-license.txt --centrality centroid
+b7d1c439da0e5e9c5dc12ebdb706b040619f2ebf05f6d03809f3c4d3eeff8dfb  samples/apache-license.txt --no-repair --lambda 0.5
+43c17d80f9f940fd6210957a653fecd623eb0df173c40d437d0c14d3849151d8  samples/us-bill.txt (defaults)
+3d44a0cdf6a7ae40401cfa2a82be369b5296d6585a989121854ad76a955ae78d  samples/us-bill.txt -n 3
+ab76a763b60311c98f71804eae93e968766b34ad53b5cfcf99368bf95fd96023  samples/us-bill.txt --words 150
+b1d2c8a87d5ed3c181cc07e61223e05e62e68286045aaba78f4159b92dccaa31  samples/us-bill.txt --centrality centroid
+40af127b25a668d353cb47ed1a2eb3fcd331225a98e73a9654c0e1629e231785  samples/us-bill.txt --no-repair --lambda 0.5
