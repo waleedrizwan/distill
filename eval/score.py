@@ -182,6 +182,7 @@ def main():
     ap.add_argument("--budget", choices=["sentences", "words", "both"], default="both")
     ap.add_argument("--limit", type=int, default=0, help="score only the first N documents per set")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
+    ap.add_argument("--model", help="model folder for distill and centroid (default: distill's own lookup)")
     ap.add_argument("--extra", default="", help="extra flags for the distill method, e.g. \"--lambda 0.6\"")
     ap.add_argument("--save", help="write per-cell averages to this JSON file")
     ap.add_argument("--compare", help="JSON from an earlier --save; prints the difference in each cell")
@@ -192,6 +193,10 @@ def main():
     env = dict(os.environ)
     env.setdefault("DISTILL_CACHE", str(HERE / ".cache"))  # embeddings are reused across methods and runs
     env.setdefault("RAYON_NUM_THREADS", "2")
+    if args.model:
+        if not (Path(args.model) / "model.safetensors").is_file():
+            sys.exit(f"{args.model} has no model.safetensors; run: ./fetch-model.sh NAME")
+        env["DISTILL_MODEL"] = str(Path(args.model).resolve())
     extra = args.extra.split()
     budgets = ["sentences", "words"] if args.budget == "both" else [args.budget]
     before = json.loads(Path(args.compare).read_text()) if args.compare else {}

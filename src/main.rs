@@ -268,6 +268,14 @@ fn run() -> Result<()> {
             summary_words,
             100.0 * summary_words as f32 / source_words.max(1) as f32
         );
+        let st = embedder.settings();
+        eprintln!(
+            "model {} ({:?} pooling, {} tokens{})",
+            model_dir.display(),
+            st.pooling,
+            st.max_tokens,
+            if st.prefix.is_empty() { String::new() } else { format!(", prefix {:?}", st.prefix) }
+        );
         eprintln!(
             "parse {:.0?}, model load {:.0?}, embed {:.0?}, select {:.0?}, total {:.0?}",
             t1 - t0,
@@ -332,8 +340,9 @@ fn embed_cached(embedder: &embed::Embedder, texts: &[&str], batch_size: usize) -
     let Some(dir) = std::env::var_os("DISTILL_CACHE").filter(|d| !d.is_empty()).map(PathBuf::from) else {
         return embedder.embed(texts, batch_size);
     };
-    // FNV-1a over all sentence texts.
-    let mut h: u64 = 0xcbf29ce484222325;
+    // FNV-1a over all sentence texts, seeded with the model's fingerprint so a
+    // different model never reuses another model's vectors.
+    let mut h: u64 = 0xcbf29ce484222325 ^ embedder.fingerprint();
     for t in texts {
         for b in t.bytes().chain(std::iter::once(0u8)) {
             h ^= b as u64;
