@@ -1,0 +1,51 @@
+[package]
+name = "distill-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.distill]
+path = ".."
+
+# One target per contract. Run with `cargo +nightly fuzz run <name>`.
+
+[[bin]]
+name = "compress"
+path = "fuzz_targets/compress.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "split"
+path = "fuzz_targets/split.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lexical"
+path = "fuzz_targets/lexical.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "segment"
+path = "fuzz_targets/segment.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "select"
+path = "fuzz_targets/select.rs"
+test = false
+doc = false
+bench = false

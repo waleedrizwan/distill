@@ -51,3 +51,27 @@ jobs:
 
       - name: Determinism
         run: eval/determinism.sh ${{ matrix.determinism }}
+
+  fuzz:
+    # A short run of every fuzz target, seeded with the samples. Long runs
+    # are for a workstation: `cargo +nightly fuzz run <target>`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+
+      - run: cargo install cargo-fuzz --locked
+
+      - name: Fuzz (30 s per target)
+        run: |
+          for t in compress split lexical segment select; do
+            mkdir -p fuzz/corpus/$t
+            cargo +nightly fuzz run $t fuzz/corpus/$t samples -- -max_total_time=30 -max_len=4096 -timeout=10
+          done

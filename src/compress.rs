@@ -62,15 +62,34 @@ re!(
 /// The compressed sentence, or `None` when no rule applies (or the result
 /// would be too short to trust).
 pub fn compress(text: &str) -> Option<String> {
-    let mut s = text.trim().to_string();
-    let before = word_count(&s);
+    let original = text.trim();
+    let before = word_count(original);
+    let mut s = original.to_string();
+    // A removal can expose another match: a parenthetical inside one, or a
+    // clause whose closing punctuation `tidy` has just repaired. Run the
+    // rules until nothing changes, so the output is a fixed point; the length
+    // floors are against the original.
+    loop {
+        let next = pass(&s);
+        let after = word_count(&next);
+        if next == s || after < 5 || (after as f32) < 0.4 * before as f32 {
+            break;
+        }
+        s = next;
+    }
+    (s != original).then_some(s)
+}
+
+/// One application of every rule.
+fn pass(text: &str) -> String {
+    let mut s = text.to_string();
     let mut opened = false;
 
     if let Some(m) = re_dateline().find(&s) {
         s.replace_range(..m.end(), "");
         opened = true;
     }
-    s = re_citation().replace_all(&s, "").into_owned();
+    s = replace_outside_quotes(&s, re_citation(), |_| String::new());
     s = replace_outside_quotes(&s, re_paren(), |c| {
         let inner = c[1].trim();
         let keep = re_label().is_match(inner)
@@ -102,15 +121,12 @@ pub fn compress(text: &str) -> Option<String> {
         opened = true;
     }
 
-    let mut s = tidy(&s);
+    let s = tidy(&s);
     if opened {
-        s = capitalise_first(&s);
+        capitalise_first(&s)
+    } else {
+        s
     }
-    let after = word_count(&s);
-    if s == text.trim() || after < 5 || (after as f32) < 0.4 * before as f32 {
-        return None;
-    }
-    Some(s)
 }
 
 re!(re_coordinator, r"^(?:and|or|but|nor)\b");
@@ -154,17 +170,26 @@ pub fn inside_quote(s: &str, pos: usize) -> bool {
 }
 
 /// Like `Regex::replace_all`, but leaves matches that start or end inside a
-/// quotation untouched, so quoted words are never altered.
+/// quotation, or contain one, untouched, so quoted words are never altered;
+/// and skips a deletion that would fuse the words on either side
+/// ("mill (built 1850)was") into one the input never had.
 fn replace_outside_quotes(s: &str, re: &Regex, mut with: impl FnMut(&regex::Captures) -> String) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last = 0;
     for c in re.captures_iter(s) {
         let m = c.get(0).expect("whole match");
         out.push_str(&s[last..m.start()]);
-        if inside_quote(s, m.start()) || inside_quote(s, m.end()) {
-            out.push_str(m.as_str());
-        } else {
-            out.push_str(&with(&c));
+        let fuses = s[..m.start()].chars().next_back().is_some_and(char::is_alphanumeric)
+            && s[m.end()..].chars().next().is_some_and(char::is_alphanumeric);
+        let touches_quote = inside_quote(s, m.start())
+            || inside_quote(s, m.end())
+            || m.as_str().contains(['"', '\u{201C}', '\u{201D}'])
+            || m.as_str().contains("``")
+            || m.as_str().contains("''");
+        let r = if touches_quote { None } else { Some(with(&c)) };
+        match r {
+            Some(r) if !(r.is_empty() && fuses) => out.push_str(&r),
+            _ => out.push_str(m.as_str()),
         }
         last = m.end();
     }
@@ -336,6 +361,20 @@ mod tests {
     }
 
     #[test]
+    fn deletions_never_fuse_words_or_enter_quotes() {
+        // Found by fuzzing: an aside with no space after it would glue its
+        // neighbours into a word the input never had.
+        assert_eq!(c("The old mill (built in 1850)was restored by the council last year, which pleased residents."), "The old mill (built in 1850)was restored by the council last year.");
+        assert_eq!(c("The old mill (built in 1850) was restored by the council last year."), "The old mill was restored by the council last year.");
+        // A citation inside a quotation is part of the quotation.
+        assert_eq!(compress("He said \"see [3] for the details\" and then left the room."), None);
+        assert_eq!(c("He said see [3] for the details and then left the room."), "He said see for the details and then left the room.");
+        // An aside that contains a quotation would take the quotation with it.
+        assert_eq!(compress("The minister -- \"we will act,\" she said -- left the chamber before the vote."), None);
+        assert_eq!(c("The minister -- visibly tired, aides said -- left the chamber before the vote."), "The minister left the chamber before the vote.");
+    }
+
+    #[test]
     fn idempotent() {
         // A second pass finds nothing more to remove: each rule removes all of
         // what it matches, so the output is a fixed point.
@@ -402,5 +441,53 @@ mod tests {
         assert!(!is_legal("The council met on Tuesday to discuss the budget."));
         // Whole words only: "meanspirited" and "marshall" are not operative text.
         assert!(!is_legal("Critics called the meanspirited ad unfair to Marshall voters."));
+    }
+    mod props {
+        //! The deletion-only contract on generated sentences, and no panics
+        //! on arbitrary text.
+        use super::*;
+        use crate::testgen::{messy, sentence};
+        use proptest::prelude::*;
+
+        fn quoted() -> &'static Regex {
+            static R: OnceLock<Regex> = OnceLock::new();
+            R.get_or_init(|| Regex::new(r#""[^"]*"|\u{201C}[^\u{201D}]*\u{201D}|``.*?''"#).unwrap())
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(2000))]
+
+            #[test]
+            fn deletion_only(s in sentence()) {
+                let Some(out) = compress(&s) else { return Ok(()) };
+                prop_assert_ne!(&out, s.trim());
+                prop_assert!(is_subsequence(&toks(&out), &toks(&s)), "{:?} is not a subsequence of {:?}", out, s);
+                let (a, b) = (word_count(&out), word_count(&s));
+                prop_assert!(a >= 5 && a as f32 >= 0.4 * b as f32, "too short: {:?} from {:?}", out, s);
+                prop_assert!(a < b || out.len() < s.trim().len(), "nothing removed: {:?}", out);
+                for q in quoted().find_iter(&s) {
+                    prop_assert!(out.contains(q.as_str()), "quotation {:?} altered in {:?}", q.as_str(), out);
+                }
+                for junk in [" ,", " .", ",,", "( )", "()", "  "] {
+                    prop_assert!(!out.contains(junk), "leftover {:?} in {:?}", junk, out);
+                }
+                // A second pass finds nothing more, unless the length floor
+                // (measured against the original) is what stopped the first.
+                if let Some(more) = compress(&out) {
+                    let m = word_count(&more);
+                    prop_assert!(m < 5 || (m as f32) < 0.4 * b as f32, "a second pass changed {:?} to {:?}", out, more);
+                }
+            }
+
+            #[test]
+            fn never_panics(s in messy()) {
+                let _ = compress(&s);
+                let _ = is_legal(&s);
+                for (i, _) in s.char_indices() {
+                    let _ = inside_quote(&s, i);
+                }
+                let _ = inside_quote(&s, s.len());
+            }
+        }
     }
 }

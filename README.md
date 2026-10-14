@@ -242,6 +242,15 @@ two sentences were tied to about seven decimal places, so CI compares the golden
 hashes on macOS arm64 (where they were recorded) and checks thread independence
 on Linux.
 
+The guarantees are also property tests, run by `cargo test`: on thousands of
+generated sentences and documents (`src/testgen.rs`), `--compress` only ever
+removes words, `--split` keeps every word but the dropped "and", a lexical swap
+never touches quoted text and changes nothing outside its range, the sentence
+splitter loses no text, and selection stays in document order within its
+budget. The same contracts are fuzz targets in `fuzz/` (`cargo +nightly fuzz
+run compress`, likewise `split`, `lexical`, `segment` and `select`; needs
+`cargo install cargo-fuzz`). CI runs each target for 30 seconds.
+
 ## Limits
 
 - **Extractive only.** It can leave things out, but it cannot rephrase, merge
