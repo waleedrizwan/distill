@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    # Golden hashes were recorded on macOS arm64, so they are compared there.
+    # Linux checks everything except the golden comparison: another CPU type can
+    # differ in the last float digits of the embeddings.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            determinism: ""
+          - os: ubuntu-latest
+            determinism: --threads-only
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: model
+          key: model-${{ hashFiles('fetch-model.sh') }}
+
+      - name: Fetch embedding model (pinned revision, checksum-verified)
+        run: ./fetch-model.sh
+
+      - name: Clippy
+        run: cargo clippy --release --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Determinism
+        run: eval/determinism.sh ${{ matrix.determinism }}

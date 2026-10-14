@@ -30,6 +30,7 @@ Input is plain text or Markdown, from a file or stdin. For PDFs, convert first:
 distill [FILE]            summarize FILE (or stdin)
   -n, --sentences N       number of sentences (default: ~10% of the document, 3 to 15)
   -r, --ratio R           or a fraction of the document, e.g. 0.05
+  -w, --words N           or up to N words (context sentences are extra)
       --json              sentence positions, sections and scores
       --show-segments     print how the text was split, without summarizing
       --no-repair         don't add context sentences
@@ -70,27 +71,69 @@ reuse embeddings when re-running on the same document with different options.
 
 ## What was measured
 
-Scored against human-written reference summaries with a simple ROUGE (no
-stemming, so only comparable within this table):
+Everything in this section is reproducible from the repo:
 
-| Set | Method | ROUGE-1 | ROUGE-2 | ROUGE-L |
-|---|---|---|---|---|
-| 100 news articles (CNN/DailyMail test), 3 sentences | first 3 sentences | 29.1 | 11.0 | 19.9 |
-| | plain centroid ranking | 26.3 | 8.3 | 17.9 |
-| | **distill defaults** | 29.4 | 11.7 | 20.5 |
-| 60 US bills (BillSum test), 5 sentences | first 5 sentences | 37.7 | 16.8 | 24.4 |
-| | plain centroid ranking | 41.0 | 18.5 | 25.7 |
-| | **distill defaults** | 41.4 | 19.8 | 26.2 |
+```sh
+python3 eval/fetch_data.py   # downloads the frozen sample, checks it against eval/manifest.tsv
+cargo build --release
+python3 eval/score.py        # about 30 s on an M-series Mac
+```
 
-"First N sentences" is a famously strong baseline on news; matching it without
-being told the text is news is the point. On the bills, distill's five picks
-averaged 217 words against 170 for the first five sentences, which flatters it
-somewhat. No research papers were scored, only read by eye.
+The sample is the first 100 CNN/DailyMail test articles, the first 60 BillSum
+test bills and the first 10 arXiv test papers. The text is not committed, but
+each document's SHA-256 is, so a different download fails instead of quietly
+changing the scores. ROUGE is computed by `eval/score.py` with no stemming, so
+the numbers are only comparable within this table.
 
-Determinism was checked by hashing the output across repeated runs and across
-1, 2 and 4 threads: identical. Across different CPU types the embeddings could
-differ in the last float digits, which would only matter if two sentences were
-tied to about seven decimal places.
+Each set is scored twice. "N sentences" is the original setup. "ref length"
+gives every method a word budget equal to that document's reference summary,
+which removes the advantage of picking longer sentences. The Words column is the
+average summary length; distill's includes the context sentences it adds for
+readability, which the word budget does not count yet.
+
+| Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words |
+|---|---|---|---|---|---|---|
+| cnndm (n=100) | 3 sentences | lead | 29.4 | 12.3 | 21.0 | 65 |
+|  |  | centroid | 26.7 | 8.9 | 17.9 | 76 |
+|  |  | distill | **29.5** | **11.9** | **20.8** | **80** |
+|  | ref length (34 w) | lead | 27.5 | 8.9 | 19.4 | 34 |
+|  |  | centroid | 25.8 | 7.0 | 17.4 | 32 |
+|  |  | distill | **28.2** | **9.5** | **19.7** | **37** |
+| billsum (n=60) | 5 sentences | lead | 36.6 | 16.9 | 24.2 | 115 |
+|  |  | centroid | 38.1 | 17.1 | 23.5 | 236 |
+|  |  | distill | **38.9** | **18.7** | **25.0** | **244** |
+|  | ref length (168 w) | lead | 42.9 | 19.7 | 27.4 | 166 |
+|  |  | centroid | 41.2 | 16.3 | 24.6 | 164 |
+|  |  | distill | **43.1** | **19.8** | **26.7** | **217** |
+| arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 |
+|  |  | centroid | 28.8 | 8.8 | 15.9 | 326 |
+|  |  | distill | **35.1** | **12.4** | **18.8** | **266** |
+|  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 |
+|  |  | centroid | 36.0 | 10.9 | 21.5 | 140 |
+|  |  | distill | **38.5** | **12.4** | **20.7** | **156** |
+
+What this shows:
+
+- **News:** distill matches the first-three-sentences baseline, which is
+  famously hard to beat, without being told the text is news. At equal length it
+  is slightly ahead, though with about three more words per summary.
+- **Bills:** the advantage at five sentences came mostly from length. Under a
+  word budget distill ties lead on ROUGE while using about 30% more words,
+  almost all of it context sentences pulled in by repair.
+- **Papers:** ten documents is too few to read much into. The arXiv set is also
+  lowercased and pre-tokenised, which is not what the splitter was built for.
+
+`eval/baseline.json` holds these averages. After a change, run
+`python3 eval/score.py --compare eval/baseline.json` to see the difference in
+every cell.
+
+Determinism is checked by `eval/determinism.sh`: the committed samples are
+summarized in several modes with 1 and 4 threads, and the output hashes must
+agree with each other and with `eval/golden.sha256`. Across different CPU types
+the embeddings could differ in the last float digits, which would only matter if
+two sentences were tied to about seven decimal places, so CI compares the golden
+hashes on macOS arm64 (where they were recorded) and checks thread independence
+on Linux.
 
 ## Limits
 
@@ -112,6 +155,8 @@ tied to about seven decimal places.
 ## Tests
 
 `cargo test --release` runs the splitter, heading, list and selection tests.
+`eval/determinism.sh` checks that output is reproducible (see above). CI runs
+both, plus `cargo clippy -- -D warnings`, on every push and pull request.
 
 ## Chrome extension
 
