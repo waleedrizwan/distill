@@ -1,0 +1,27 @@
+[package]
+name = "distill"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic extractive summarizer: sentence embeddings + MMR, no text generation"
+
+[dependencies]
+anyhow = "1"
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+ureq = { version = "2", features = ["json"] }
+
+[features]
+# Faster matrix maths. macOS: --features accelerate   Intel Linux/Windows: --features mkl
+accelerate = ["candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
+mkl = ["candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
