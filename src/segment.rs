@@ -798,6 +798,12 @@ fn push(chars: &[char], out: &mut Vec<String>) {
 /// Decide whether the punctuation at `p` ends a sentence, given that the next
 /// non-space character is at `k`.
 fn is_boundary(chars: &[char], start: usize, p: usize, run: usize, k: usize) -> bool {
+    // A bibliography entry ("[3] Smith, J. A study of ... Nature, 2019.") is
+    // full of initials and inner full stops; it ends only where the next entry
+    // starts, so each entry stays one (non-candidate) unit.
+    if is_bib_label(chars, start) {
+        return is_bib_label(chars, k);
+    }
     let n = chars.len();
     let mut a = k;
     while a < n && is_opener(chars[a]) && chars[a] != '(' {
@@ -881,6 +887,18 @@ fn is_boundary(chars: &[char], start: usize, p: usize, run: usize, k: usize) -> 
         return starters().contains(next.as_str());
     }
     true
+}
+
+/// Does a numbered reference label such as "[12] " start at `i`? (The same
+/// shape `re_bib_entry` matches.)
+fn is_bib_label(chars: &[char], i: usize) -> bool {
+    if chars.get(i) != Some(&'[') {
+        return false;
+    }
+    let digits = chars[i + 1..].iter().take_while(|c| c.is_ascii_digit()).count();
+    (1..=3).contains(&digits)
+        && chars.get(i + 1 + digits) == Some(&']')
+        && chars.get(i + 2 + digits).is_some_and(|c| c.is_whitespace())
 }
 
 #[cfg(test)]
@@ -1146,6 +1164,7 @@ mod tests {
             ("What exactly did the committee decide on that day?", "question"),
             ("Figure 3: Accuracy of every model on the test set.", "caption"),
             ("[12] World Health Organization report on air quality and health, 2021 edition.", "bibliography entry"),
+            ("[12] Smith, J. A study of things and stuff, 2020.", "bibliography entry with initials"),
             ("This section describes the method in more detail.", "signposting"),
             ("The following items are included in the package:", "lead-in"),
             ("12.5 33.1 47.9 88.0 91.2 14.4 63.0", "numbers"),
@@ -1154,6 +1173,26 @@ mod tests {
             let doc = parse(s, &opts);
             assert!(doc.sentences.iter().all(|x| !x.candidate), "{why} is a candidate: {s}");
         }
+    }
+
+    #[test]
+    fn bibliography_entries_stay_whole() {
+        // Consecutive entries arrive as one paragraph. Each should come out as
+        // one unit, not split at initials and inner full stops, where a long
+        // title fragment would become a candidate.
+        let refs = "[1] Smith, J. A. Learning to summarize long documents with sentence graphs. Journal of Language Engineering, 12(3), 2020. [2] Jones, K. B. and Lee, M. Extractive methods for very long legislative texts. Proc. ACL, pp. 1-9, 2019. [3] Lee, A. A survey of evaluation metrics for automatic text summarization systems, 2018.";
+        let s = split(refs);
+        assert_eq!(s.len(), 3, "{s:#?}");
+        assert!(s[0].starts_with("[1] ") && s[1].starts_with("[2] ") && s[2].starts_with("[3] "));
+        let doc = parse(&format!("Some ordinary introductory text that is long enough to count.\n\n{refs}"), &ParseOptions::default());
+        assert!(doc.sentences[0].candidate);
+        assert!(doc.sentences[1..].iter().all(|x| !x.candidate), "{:#?}", doc.sentences);
+
+        // Citation markers inside prose do not change how prose is split.
+        assert_eq!(
+            split("The method was proposed earlier [3]. It was later extended [4, 5]. Results improved."),
+            vec!["The method was proposed earlier [3].", "It was later extended [4, 5].", "Results improved."]
+        );
     }
 
     #[test]
