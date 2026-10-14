@@ -125,11 +125,23 @@ centrality to pick such fragments. Keeping quotations whole in
 Each layer has its own flag and tests. Where the layer keeps output as a subset
 of the input's words, a property test enforces that.
 
-- [ ] **Deletion-based compression.** Rule-based removal of parentheticals,
-  appositives, citations, "which" clauses and sentence-initial adverbials. The
-  output is a subsequence of the input, so every word is still verbatim. Later,
-  a token-deletion classifier trained on the Google sentence-compression data
-  on top of the frozen encoder.
+- [x] **Deletion-based compression (`--compress`, `src/compress.rs`).** Rules
+  on punctuation and a short word list remove parentheticals, bracketed
+  citations, comma-bounded "which"/"who" clauses, spaced dash asides and
+  sentence-opening connectives. Kept words are the input's, in order (a test
+  checks this, and so did a pass over every compressed sentence in the
+  development summaries); the only change to a kept word is capitalising a new
+  first word. Guards came from reading output: list labels, acronym
+  definitions, defined terms, qualifiers ("other than ...", "except ..."),
+  anything inside quotations (including bills' ``...'' insertions), "which"
+  clauses in legal operative text, clauses that would swallow the main verb,
+  and coordinated clauses are all left alone. Result at reference length:
+  ROUGE-2 +0.24 on development news (significant), +0.12 on development bills;
+  on the test sets +0.12 news and +0.33 bills (both significant), +0.38 papers.
+  It removes about 3% of words on news and 1% on bills. Opt-in, since it
+  relaxes the whole-sentence guarantee. Not done: the trained token-deletion
+  classifier on the Google sentence-compression data.
+
 - [ ] **Lexical substitution from a fixed table** (for example SimplePPDB ranked
   by word frequency). A swap is accepted only if the sentence embedding stays
   within a cosine threshold of the original. The table is a plain file anyone

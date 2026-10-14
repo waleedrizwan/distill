@@ -4,7 +4,9 @@ A deterministic extractive summarizer in Rust. It picks the most representative
 sentences from a document and prints them **verbatim**, in their original order.
 
 - **Cannot hallucinate.** No text is generated. Every output sentence is a
-  sentence from the input (whitespace-normalised).
+  sentence from the input (whitespace-normalised). With `--compress`, a
+  sentence can have pieces left out, but every word it keeps is from the input,
+  in order.
 - **Deterministic.** Same input and same binary give byte-identical output.
 - **Local.** One binary plus a 90 MB model file. No network at run time.
 
@@ -36,6 +38,8 @@ distill [FILE]            summarize FILE (or stdin)
   -w, --words N           or up to N words, context sentences included
       --json              sentence positions, sections and scores
       --show-segments     print how the text was split, without summarizing
+      --compress          leave out asides: parentheticals, citations, "which"/"who"
+                          clauses, dash interruptions, openers like "However,"
       --no-repair         don't add context sentences
       --no-headings       don't print section headings
       --dehyphenate       rejoin words broken across lines (PDF text)
@@ -163,6 +167,12 @@ and a paired bootstrap 95% interval for distill's ROUGE-2, so a change only
 counts when the interval excludes zero. `eval/baseline.json` holds the test
 results in the same format.
 
+`--compress` (`src/compress.rs`) is measured the same way. At reference length
+it raised ROUGE-2 by 0.1 to 0.4 points on every set, significantly on news and
+on the test bills, because the words it frees go to more content. It never
+touches list labels, acronym definitions, defined terms, qualifiers such as
+"(other than ...)", quoted text, or "which" clauses in legal operative text.
+
 The salience weights are trained by `python3 eval/train_salience.py` on 3,000
 CNN/DailyMail and 1,500 BillSum training documents, none of which overlap the
 development or test sets. It labels each document's sentences with a greedy
@@ -182,7 +192,9 @@ on Linux.
 ## Limits
 
 - **Extractive only.** It can leave things out, but it cannot rephrase, merge
-  two sentences, or explain a term. There is no simplification step yet.
+  two sentences, or explain a term. `--compress` only deletes. It is
+  conservative (about 3% of words on news, 1% on bills) and lossy by design:
+  a removed "which" clause can carry real information.
 - **Legal text is the weakest case.** Long nested clauses are extracted whole,
   and a clause can depend on definitions elsewhere.
 - **Sentence splitting is rule-based**, not a trained parser. Check odd input
