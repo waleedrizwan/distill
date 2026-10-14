@@ -71,18 +71,27 @@ The gate below is not met, so Milestone 2 goes ahead.
 
 `all-MiniLM-L6-v2` is a 2021 model tuned for short-text similarity and truncates
 at 256 word-pieces. Same-size BERT checkpoints load through the same candle code,
-but two things are hardcoded first:
+but two things were hardcoded first:
 
-- [ ] Read the token limit from the model's config instead of `MAX_TOKENS` in
-  `src/embed.rs`.
-- [ ] Make pooling a per-model setting stored next to the weights: bge-small
-  uses CLS pooling, gte-small mean pooling, e5-small mean pooling plus a
-  `"query: "` prefix.
-- [ ] Extend `fetch-model.sh` to take a model name, each with a pinned revision
-  and checksums.
-- [ ] Score bge-small-en-v1.5, gte-small and e5-small-v2 against MiniLM. Keep
-  the winner, or keep MiniLM. Re-measure speed: 512 tokens costs more on long
-  legal sentences.
+- [x] The token limit comes from the model folder's `distill.json`, capped by
+  the model's position embeddings, instead of `MAX_TOKENS` in `src/embed.rs`.
+- [x] Pooling and text prefix are per-model settings in `distill.json`:
+  bge-small uses CLS pooling, gte-small mean pooling, e5-small mean pooling
+  plus a `"query: "` prefix. Without the file, MiniLM's settings apply, and
+  MiniLM output is byte-identical either way.
+- [x] `fetch-model.sh NAME` downloads minilm, bge, gte or e5, each with a pinned
+  revision and checksums. The embedding cache is now keyed by model too;
+  before, switching models silently reused the old model's vectors.
+- [x] **Result: keep MiniLM.** On the development sets at reference length,
+  no candidate beats it on news or bills, and none of the differences is
+  significant. That still holds after retuning lambda and beta for each model.
+  The candidates have 12 layers to MiniLM's 6 and take about twice as long to
+  embed. The 512-token limit did not help the bills either. Table in README.
+
+**Gate result.** Swapping the encoder leaves the ranking where it was: level
+with the first sentences on news and behind them on bills. The unsupervised
+signal looks saturated, which is the headroom Milestone 3 needs, so it goes
+ahead with MiniLM as the frozen encoder.
 
 ## Milestone 3: learned salience head (only if Milestone 2 leaves headroom)
 

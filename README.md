@@ -47,6 +47,27 @@ new line means text was skipped in between.
 The model folder is looked for in `--model-dir`, `$DISTILL_MODEL`, `./model`,
 next to the binary, then `~/.distill/model`. Set `DISTILL_CACHE=<folder>` to
 reuse embeddings when re-running on the same document with different options.
+The cache is keyed by model as well as text, so switching models is safe.
+
+### Other embedding models
+
+`./fetch-model.sh NAME` downloads another pinned, checksum-verified model into
+`./model-NAME`; use it with `--model-dir model-NAME`. The folder's
+`distill.json` records the pooling, token limit and text prefix the model
+needs. Any BERT-architecture sentence-embedding model works the same way.
+
+| Name | Model | Size | Layers | Token limit | News ROUGE-2 | Bills ROUGE-2 | Embed time, bill / paper |
+|---|---|---|---|---|---|---|---|
+| `minilm` (default) | all-MiniLM-L6-v2 | 90 MB | 6 | 256 | 9.0 | 19.4 | 0.5 s / 2 s |
+| `bge` | bge-small-en-v1.5 | 130 MB | 12 | 512 | 8.9 | 19.0 | 1 s / 4 s |
+| `gte` | gte-small | 65 MB | 12 | 512 | 8.8 | 19.5 | 1 s / 4 s |
+| `e5` | e5-small-v2 | 130 MB | 12 | 512 | 8.7 | 18.9 | 1 s / 4 s |
+
+ROUGE-2 is on the development sets (500 news articles, 300 bills) at reference
+length. None of the differences from the default is significant, including
+after retuning the diversity and similarity-threshold knobs for each model, so
+the default stays the smallest and fastest. Times are for the 1,662-word bill in
+`samples/` and a 5,800-word arXiv paper, on two threads of an M-series Mac.
 
 ## How it works
 
@@ -151,7 +172,8 @@ on Linux.
   sentences per second on two slow cloud cores, so about 1 s for a news
   article and 3 s for a 3,700-word paper there. Everything else takes
   milliseconds.
-- Sentences over 256 word-pieces are ranked on their first 256.
+- Sentences over 256 word-pieces are ranked on their first 256 (512 with the
+  other models above).
 - Common web page furniture is filtered out before ranking: consent banners,
   "Read more:" and "Click here" links, share and follow prompts, newsletter
   sign-ups, link menus, copyright and licence footers, and sections such as

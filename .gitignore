@@ -2,3 +2,4 @@ target/
 model/
 eval/data/
 eval/.cache/
+model-*/
