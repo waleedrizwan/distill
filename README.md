@@ -91,6 +91,8 @@ the default stays the smallest and fastest. Times are for the 1,662-word bill in
    for academic and legal text (`et al.`, `Fig. 3`, `42 U.S.C. § 1983`,
    `Smith v. Jones`). A short list is folded into the sentence that introduces
    it, so "X means-- (A) ..., (B) ..., and (C) ..." stays one unit.
+   A quotation of up to 60 words stays one sentence even when it contains
+   full stops, so a quoted statement is not cut in half.
 2. **Embed** (`src/embed.rs`). Each candidate sentence becomes a 384-dimension
    vector.
 3. **Rank** (`src/select.rs`). A sentence scores highly when the rest of the
