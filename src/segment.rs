@@ -739,10 +739,75 @@ fn is_opener(c: char) -> bool {
     matches!(c, '"' | '\'' | '(' | '[' | '\u{201C}' | '\u{2018}' | '\u{00AB}' | '`')
 }
 
+/// Longest quotation (in words) kept whole as one sentence. Longer quotes are
+/// split normally so a speech does not become one unpickable unit.
+const MAX_QUOTE_WORDS: usize = 60;
+
+/// Double-quoted spans `(open, close)` that close within the paragraph and are
+/// at most `MAX_QUOTE_WORDS` long. Covers straight `"`, curly `“”` and the
+/// ``...'' style of bills. Single quotes are left alone: `'` and `’` are
+/// mostly apostrophes.
+fn quote_spans(chars: &[char]) -> Vec<(usize, usize)> {
+    let n = chars.len();
+    let mut spans = Vec::new();
+    let mut open: Option<usize> = None;
+    let mut i = 0;
+    while i < n {
+        let c = chars[i];
+        let pair = i + 1 < n && chars[i + 1] == c;
+        let (is_open, is_close, width) = match c {
+            '\u{201C}' => (true, false, 1),
+            '\u{201D}' => (false, true, 1),
+            '`' if pair => (true, false, 2),
+            '\'' if pair => (false, true, 2),
+            '"' => {
+                // Closing quotes are followed by a space or punctuation
+                // (`said,"`, `nice." He`); `(CNN)"This` and `"[The]` open.
+                let next = chars.get(i + 1).copied();
+                let closes = next.is_none_or(|d| d.is_whitespace() || (d.is_ascii_punctuation() && !is_opener(d)));
+                let opens = !closes && (i == 0 || !chars[i - 1].is_alphanumeric());
+                (opens, closes, 1)
+            }
+            _ => (false, false, 1),
+        };
+        if is_open {
+            // News style: a quote running over several paragraphs reopens
+            // without closing, and the paragraph breaks are lost by the time
+            // text reaches us. Treat the reopening as the end of the previous
+            // quoted paragraph. In bills, ``(b) after ``(a) starts a new clause,
+            // so the first is simply dropped.
+            if let Some(o) = open {
+                if c != '`' {
+                    let mut e = i;
+                    while e > o + 1 && chars[e - 1].is_whitespace() {
+                        e -= 1;
+                    }
+                    push_span(chars, o, e - 1, &mut spans);
+                }
+            }
+            open = Some(i);
+        } else if is_close {
+            if let Some(o) = open.take() {
+                push_span(chars, o, i + width - 1, &mut spans);
+            }
+        }
+        i += width;
+    }
+    spans
+}
+
+fn push_span(chars: &[char], open: usize, close: usize, spans: &mut Vec<(usize, usize)>) {
+    let words = chars[open..=close].iter().collect::<String>().split_whitespace().count();
+    if words <= MAX_QUOTE_WORDS {
+        spans.push((open, close));
+    }
+}
+
 /// Split one paragraph (whitespace already collapsed) into sentences.
 pub fn split_sentences(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
+    let quotes = quote_spans(&chars);
     let mut out = Vec::new();
     let mut start = 0usize;
     let mut i = 0usize;
@@ -772,7 +837,9 @@ pub fn split_sentences(text: &str) -> Vec<String> {
             if k >= n {
                 break;
             }
-            if is_boundary(&chars, start, i, run, k) {
+            // Inside a quotation that closes later: keep it whole.
+            let quoted = quotes.iter().any(|&(o, c)| o < i && j <= c);
+            if !quoted && is_boundary(&chars, start, i, run, k) {
                 push(&chars[start..j], &mut out);
                 start = k;
                 i = k;
@@ -948,6 +1015,47 @@ mod tests {
         assert_eq!(s.len(), 4, "{s:#?}");
         let s = split("\"Why?\" he asked. Nobody answered.");
         assert_eq!(s.len(), 2, "{s:#?}");
+    }
+
+    #[test]
+    fn multi_sentence_quotes_stay_whole() {
+        let s = split("\"I just let frustration get the better of me. It was heat of the moment, and I mean, if it had of been any other club I probably wouldn't have but I didn't need a 3-iron for the rest of the round so I thought, why not.\" The club \"must have went a good 60, 70 yards,\" he joked.");
+        assert_eq!(s.len(), 2, "{s:#?}");
+        assert!(s[0].ends_with("why not.\""));
+        assert!(s[1].starts_with("The club"));
+
+        let s = split("He said: \u{201C}We lost. We will be back.\u{201D} Then he left.");
+        assert_eq!(s, vec!["He said: \u{201C}We lost. We will be back.\u{201D}", "Then he left."]);
+
+        let s = split("Section 2 is amended by adding ``(c) Exception.--This section shall not apply. The Secretary may waive it.''. The amendment takes effect on enactment.");
+        assert_eq!(s.len(), 2, "{s:#?}");
+        assert!(s[0].ends_with("waive it.''."));
+
+        // A straight quote right after "(CNN)" opens.
+        let s = split("(CNN)\"This is a test. We will see.\" Those were her words.");
+        assert_eq!(s.len(), 2, "{s:#?}");
+
+        // A quote continued over paragraphs reopens without closing; each
+        // quoted paragraph stays whole.
+        let s = split("He told BT Sport: \"Look, it's not nice. I think he is spitting. \"I know him. He is not that type.\" Others disagreed.");
+        assert_eq!(
+            s,
+            vec![
+                "He told BT Sport: \"Look, it's not nice. I think he is spitting.",
+                "\"I know him. He is not that type.\"",
+                "Others disagreed.",
+            ]
+        );
+    }
+
+    #[test]
+    fn unclosed_or_long_quotes_split_normally() {
+        // Opens but never closes in this paragraph (a quote continued in the next).
+        let s = split("\"We are ready. The team has worked hard. Nobody doubts it.");
+        assert_eq!(s.len(), 3, "{s:#?}");
+        // Over the length cap.
+        let long = format!("\"{}. More {}.\" He paused.", "word ".repeat(40).trim(), "more ".repeat(30).trim());
+        assert_eq!(split(&long).len(), 3);
     }
 
     #[test]
