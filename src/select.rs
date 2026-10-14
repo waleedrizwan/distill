@@ -60,6 +60,9 @@ pub struct Params {
     pub salience_weight: f32,
     /// Return every candidate's feature vector in `Selection::features`.
     pub want_features: bool,
+    /// Words each sentence will occupy in the output, by sentence index, when
+    /// that differs from `Sentence::words` (compression). Word budget only.
+    pub word_cost: Option<Vec<usize>>,
 }
 
 impl Default for Params {
@@ -79,6 +82,7 @@ impl Default for Params {
             salience: None,
             salience_weight: 0.0,
             want_features: false,
+            word_cost: None,
         }
     }
 }
@@ -374,7 +378,11 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
     // Under a word budget a pick also pays for the context sentences repair will
     // add for it, minus anything already in the output, so the budget bounds
     // the whole summary.
-    let words_of = |ci: usize| doc.sentences[cand[ci]].words as f64;
+    let out_words = |si: usize| match &p.word_cost {
+        Some(w) => w[si],
+        None => doc.sentences[si].words,
+    } as f64;
+    let words_of = |ci: usize| out_words(cand[ci]);
     let chains: Vec<Vec<usize>> = match (p.word_budget, p.repair) {
         (Some(_), true) => cand.iter().map(|&si| context_chain(doc, si).0).collect(),
         _ => vec![Vec::new(); n],
@@ -386,7 +394,7 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         let mut c = if f.covered[cand[ci]] { 0.0 } else { words_of(ci) };
         for &si in &chains[ci] {
             if !f.covered[si] {
-                c += doc.sentences[si].words as f64;
+                c += out_words(si);
             }
         }
         c

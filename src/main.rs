@@ -1,3 +1,4 @@
+mod compress;
 mod embed;
 mod salience;
 mod segment;
@@ -84,6 +85,12 @@ struct Args {
     #[arg(long)]
     no_repair: bool,
 
+    /// Shorten picked sentences by deleting parentheticals, citations,
+    /// "which"/"who" clauses, dash asides and openers like "However,"
+    /// (nothing is reworded; see src/compress.rs)
+    #[arg(long)]
+    compress: bool,
+
     /// Don't print section headings
     #[arg(long)]
     no_headings: bool,
@@ -124,6 +131,9 @@ struct JsonSentence<'a> {
     rank: usize,
     score: f32,
     text: &'a str,
+    /// With --compress: the sentence before compression, when it was shortened.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -229,7 +239,25 @@ fn run() -> Result<()> {
         salience: None,
         salience_weight: args.salience.clamp(0.0, 1.0),
         want_features: args.dump_features,
+        word_cost: None,
     };
+    // Compressed text per sentence (None = unchanged). Ranking still embeds the
+    // original sentence; only the output and the word budget use this.
+    let shortened: Vec<Option<String>> = if args.compress {
+        doc.sentences.iter().map(|s| compress::compress(&s.text)).collect()
+    } else {
+        vec![None; doc.sentences.len()]
+    };
+    if args.compress {
+        params.word_cost = Some(
+            doc.sentences
+                .iter()
+                .zip(&shortened)
+                .map(|(s, c)| c.as_deref().map(|t| t.split_whitespace().count()).unwrap_or(s.words))
+                .collect(),
+        );
+    }
+    let shown = |i: usize| -> &str { shortened[i].as_deref().unwrap_or(&doc.sentences[i].text) };
     let mut head_note = "salience head off";
     if params.salience_weight > 0.0 {
         match salience::Head::builtin() {
@@ -268,7 +296,7 @@ fn run() -> Result<()> {
     let t4 = Instant::now();
 
     let source_words: usize = doc.sentences.iter().map(|s| s.words).sum();
-    let summary_words: usize = picks.iter().map(|p| doc.sentences[p.index].words).sum();
+    let summary_words: usize = picks.iter().map(|p| shown(p.index).split_whitespace().count()).sum();
 
     if args.json {
         let out = JsonOut {
@@ -292,14 +320,15 @@ fn run() -> Result<()> {
                         rank: p.rank,
                         // Four decimals: enough to rank by, and stable against float noise.
                         score: (p.score * 1e4).round() / 1e4,
-                        text: &s.text,
+                        text: shown(p.index),
+                        original: shortened[p.index].as_ref().map(|_| s.text.as_str()),
                     }
                 })
                 .collect(),
         };
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        print_text(&doc, &selection, !args.no_headings);
+        print_text(&doc, &selection, !args.no_headings, &shown);
     }
 
     if args.verbose {
@@ -336,7 +365,7 @@ fn run() -> Result<()> {
 
 /// Sentences are printed in document order. Sentences that were adjacent in
 /// the source stay on one line; a new line means text was skipped in between.
-fn print_text(doc: &segment::Document, sel: &select::Selection, headings: bool) {
+fn print_text<'a>(doc: &'a segment::Document, sel: &select::Selection, headings: bool, shown: &dyn Fn(usize) -> &'a str) {
     let titled: std::collections::BTreeSet<usize> = sel
         .picks
         .iter()
@@ -372,7 +401,7 @@ fn print_text(doc: &segment::Document, sel: &select::Selection, headings: bool) 
         if !line.is_empty() {
             line.push(' ');
         }
-        line.push_str(&s.text);
+        line.push_str(shown(p.index));
         last_index = Some(p.index);
     }
     if !line.is_empty() {
