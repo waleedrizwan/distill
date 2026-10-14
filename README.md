@@ -9,7 +9,10 @@ sentences from a document and prints them **verbatim**, in their original order.
 - **Local.** One binary plus a 90 MB model file. No network at run time.
 
 A small neural model (all-MiniLM-L6-v2) is used, but only to turn each sentence
-into a vector for *ranking*. It never writes anything.
+into a vector for *ranking*. It never writes anything. A learned salience score,
+a logistic regression over those vectors and a few position and length
+features, helps decide which sentences matter. It is a few thousand fixed
+numbers compiled into the binary.
 
 ## Build and run
 
@@ -37,6 +40,7 @@ distill [FILE]            summarize FILE (or stdin)
       --no-headings       don't print section headings
       --dehyphenate       rejoin words broken across lines (PDF text)
   -v, --verbose           counts and timings
+      --salience W        weight of the learned salience score (default 0.5, 0 = off)
       --lambda, --lead, --backward, --beta, --section-weight, --penalty, --boost
                           ranking knobs; see `distill --help`
 ```
@@ -83,7 +87,10 @@ the default stays the smallest and fastest. Times are for the 1,662-word bill in
    document echoes it, with later text counting more than earlier text. That
    one asymmetry captures "important things are stated first, then elaborated".
    Sentences that lean on other text ("However...", "see Figure 2") are
-   penalised.
+   penalised. Half of the centrality score is then replaced by a learned
+   salience score (`src/salience.rs`): a logistic regression over the sentence
+   vector plus position, length and dependence features, trained on which
+   sentences best match human summaries of news articles and bills.
 4. **Select.** Each top-level section gets a share of the budget, then
    sentences are picked greedily with MMR (relevance minus similarity to what
    is already picked), so the summary does not repeat itself.
@@ -115,33 +122,38 @@ the context sentences distill adds for readability count against the budget.
 |---|---|---|---|---|---|---|
 | cnndm (n=100) | 3 sentences | lead | 29.4 | 12.3 | 21.0 | 65 |
 |  |  | centroid | 26.7 | 9.0 | 17.9 | 76 |
-|  |  | distill | **29.5** | **11.9** | **20.8** | **80** |
+|  |  | distill | **31.1** | **13.4** | **22.3** | **74** |
 |  | ref length (34 w) | lead | 27.5 | 8.9 | 19.4 | 34 |
 |  |  | centroid | 25.8 | 7.0 | 17.4 | 32 |
-|  |  | distill | **28.0** | **9.2** | **19.7** | **32** |
+|  |  | distill | **27.7** | **9.6** | **19.7** | **32** |
 | billsum (n=60) | 5 sentences | lead | 36.6 | 16.9 | 24.2 | 115 |
 |  |  | centroid | 38.1 | 17.1 | 23.5 | 236 |
-|  |  | distill | **38.9** | **18.7** | **25.0** | **244** |
+|  |  | distill | **41.6** | **21.9** | **27.8** | **222** |
 |  | ref length (168 w) | lead | 42.9 | 19.7 | 27.4 | 166 |
 |  |  | centroid | 41.2 | 16.3 | 24.6 | 164 |
-|  |  | distill | **42.6** | **18.6** | **26.2** | **162** |
+|  |  | distill | **43.6** | **20.5** | **28.1** | **162** |
 | arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 |
 |  |  | centroid | 28.8 | 8.8 | 15.9 | 326 |
-|  |  | distill | **35.1** | **12.4** | **18.8** | **266** |
+|  |  | distill | **37.5** | **14.3** | **21.2** | **232** |
 |  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 |
 |  |  | centroid | 36.0 | 10.9 | 21.5 | 140 |
-|  |  | distill | **37.1** | **11.4** | **20.3** | **140** |
+|  |  | distill | **39.1** | **13.5** | **21.8** | **139** |
 
 What this shows:
 
-- **News:** at equal length distill is slightly ahead of the first sentences,
-  which is a famously strong baseline on news, without being told the text is
-  news. The margin is within noise.
-- **Bills:** at equal length the first sentences beat distill by about one
-  ROUGE-2 point. distill's earlier lead at five sentences came from picking
-  longer sentences and adding context on top of the budget.
-- **Papers:** ten documents is too few to read much into. The arXiv set is also
+- **News:** distill beats the first sentences, a famously strong baseline on
+  news, without being told the text is news. At equal length the margin is
+  small (9.6 against 8.9 ROUGE-2). At three sentences it is larger, but partly
+  because distill's sentences are longer.
+- **Bills:** at equal length distill is nearly a ROUGE-2 point ahead of the
+  first sentences, and well ahead of plain centroid ranking.
+- **Papers:** distill is ahead too, although no papers were used for training.
+  Ten documents is still too few to read much into, and the arXiv set is
   lowercased and pre-tokenised, which is not what the splitter was built for.
+- **The learned salience score** is where most of the gain comes from. Against
+  the same pipeline without it, ROUGE-2 at equal length rose by 1.9 points on
+  the bills and 2.2 on the papers (both significant) and 0.4 on news (not
+  significant).
 
 Knobs are tuned on separate development sets (500 CNN/DailyMail validation
 articles and 300 BillSum training bills), never on the test sets above. Run
@@ -150,6 +162,14 @@ eval/dev-baseline.json` after a change. It prints the difference in every cell
 and a paired bootstrap 95% interval for distill's ROUGE-2, so a change only
 counts when the interval excludes zero. `eval/baseline.json` holds the test
 results in the same format.
+
+The salience weights are trained by `python3 eval/train_salience.py` on 3,000
+CNN/DailyMail and 1,500 BillSum training documents, none of which overlap the
+development or test sets. It labels each document's sentences with a greedy
+ROUGE oracle, fits the regression with numpy, and writes `src/salience.json`;
+rebuild to compile the new weights in. The weights fit only the encoder they
+were trained with, so with another `--model-dir` the score is switched off and
+ranking falls back to centrality alone.
 
 Determinism is checked by `eval/determinism.sh`: the committed samples are
 summarized in several modes with 1 and 4 threads, and the output hashes must
@@ -168,6 +188,8 @@ on Linux.
 - **Sentence splitting is rule-based**, not a trained parser. Check odd input
   with `--show-segments`.
 - **English only** (abbreviation lists, dangling-reference words, the model).
+- **The salience score was trained on news and US bills.** It helped on papers
+  too, but other genres may differ; `--salience 0` turns it off.
 - **Speed is bounded by the embedding model**, not by Rust: roughly 60
   sentences per second on two slow cloud cores, so about 1 s for a news
   article and 3 s for a 3,700-word paper there. Everything else takes

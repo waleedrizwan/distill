@@ -47,6 +47,7 @@ pub struct Embedder {
     device: Device,
     settings: Settings,
     fingerprint: u64,
+    encoder: crate::salience::Encoder,
 }
 
 impl Embedder {
@@ -56,10 +57,12 @@ impl Embedder {
         let config_text = std::fs::read_to_string(&config_path)
             .with_context(|| format!("reading {}", config_path.display()))?;
         let config: Config = serde_json::from_str(&config_text).context("parsing config.json")?;
-        let positions = serde_json::from_str::<serde_json::Value>(&config_text)?
-            .get("max_position_embeddings")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(512) as usize;
+        let raw: serde_json::Value = serde_json::from_str(&config_text)?;
+        let int = |k: &str| raw.get(k).and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let positions = match int("max_position_embeddings") {
+            0 => 512,
+            p => p,
+        };
 
         let settings_path = dir.join("distill.json");
         let settings_text = match std::fs::read_to_string(&settings_path) {
@@ -92,12 +95,22 @@ impl Embedder {
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights], DType::F32, &device) }
             .context("loading model.safetensors")?;
         let model = BertModel::load(vb, &config).context("building the model")?;
-        Ok(Self { model, tokenizer, device, settings, fingerprint })
+        let encoder = crate::salience::Encoder {
+            hidden_size: int("hidden_size"),
+            num_hidden_layers: int("num_hidden_layers"),
+            weights_bytes: weights_len,
+        };
+        Ok(Self { model, tokenizer, device, settings, fingerprint, encoder })
     }
 
     /// Changes whenever the model, its settings or its weights file change.
     pub fn fingerprint(&self) -> u64 {
         self.fingerprint
+    }
+
+    /// What a salience head must have been trained on to be used with this model.
+    pub fn encoder(&self) -> crate::salience::Encoder {
+        self.encoder.clone()
     }
 
     pub fn settings(&self) -> &Settings {

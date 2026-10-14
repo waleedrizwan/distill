@@ -6,7 +6,7 @@ sets for tuning. The text itself is not committed (the news articles are
 copyrighted); instead every document's SHA-256 is in eval/manifest.tsv, so a
 run that scores different text fails loudly.
 
-    python3 eval/fetch_data.py                   # download + verify
+    python3 eval/fetch_data.py                   # download what is missing, verify all
     python3 eval/fetch_data.py --write-manifest  # (re)create the manifest
 
 Standard library only.
@@ -36,6 +36,10 @@ SETS = {
     # BillSum has no validation split, so its dev set comes from train.
     "cnndm-dev": ("abisee/cnn_dailymail", "3.0.0", "validation", 0, 500, "article", "highlights", "id"),
     "billsum-dev": ("FiscalNote/billsum", "default", "train", 0, 300, "text", "summary", None),
+    # Training sets for the salience head (eval/train_salience.py). BillSum's
+    # starts after the 300 bills used for development.
+    "cnndm-train": ("abisee/cnn_dailymail", "3.0.0", "train", 0, 3000, "article", "highlights", "id"),
+    "billsum-train": ("FiscalNote/billsum", "default", "train", 300, 1500, "text", "summary", None),
 }
 
 
@@ -43,15 +47,19 @@ def get_rows(dataset, config, split, offset, length):
     q = urllib.parse.urlencode(
         {"dataset": dataset, "config": config, "split": split, "offset": offset, "length": length}
     )
-    for attempt in range(6):
+    for attempt in range(10):
         try:
             with urllib.request.urlopen(f"{API}?{q}", timeout=60) as r:
                 body = json.load(r)
             break
         except urllib.error.HTTPError as e:
-            if e.code not in (429, 500, 502, 503, 504) or attempt == 5:
+            if e.code not in (429, 500, 502, 503, 504) or attempt == 9:
                 raise
-            time.sleep(2**attempt)
+            wait = e.headers.get("Retry-After")
+            wait = int(wait) if wait and wait.isdigit() else min(60, 2**attempt)
+            print(f"  {e.code} from the dataset server, retrying in {wait} s", file=sys.stderr)
+            time.sleep(wait)
+    time.sleep(0.3)  # stay under the server's rate limit
     rows = []
     for item in body["rows"]:
         if item.get("truncated_cells"):
@@ -95,6 +103,7 @@ def fetch(name):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--write-manifest", action="store_true", help="write eval/manifest.tsv from what was downloaded")
+    ap.add_argument("--refresh", action="store_true", help="download again even if eval/data/ already has a set")
     ap.add_argument("--sets", default=",".join(SETS), help="comma-separated subset of: " + ", ".join(SETS))
     args = ap.parse_args()
     names = [s for s in args.sets.split(",") if s]
@@ -112,7 +121,15 @@ def main():
     manifest_lines = ["# set\tid\tsha256(text NUL reference)"]
     bad = 0
     for name in names:
-        docs = fetch(name)
+        path = DATA / f"{name}.jsonl"
+        count = SETS[name][4]
+        docs = None
+        if path.exists() and not args.refresh:
+            docs = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+            if len(docs) != count:
+                docs = None
+        if docs is None:
+            docs = fetch(name)
         if not args.write_manifest:
             want = expected.get(name, {})
             got = {d["id"]: digest(d) for d in docs}
@@ -127,7 +144,7 @@ def main():
             for d in docs:
                 f.write(json.dumps(d, ensure_ascii=False) + "\n")
                 manifest_lines.append(f"{name}\t{d['id']}\t{digest(d)}")
-        print(f"{name}: {len(docs)} documents -> eval/data/{name}.jsonl")
+        print(f"{name}: {len(docs)} documents in eval/data/{name}.jsonl")
 
     if args.write_manifest:
         if set(names) != set(SETS):
