@@ -81,7 +81,6 @@ n	carcinoma	cancer	3.619	0.856
 n	characterization	description	3.842	0.898
 n	commemoration	memorial	3.648	0.892
 n	conglomerate	company	3.721	0.921
-n	contamination	pollution	3.909	0.791
 n	crewmembers	crew	4.039	0.879
 n	criminality	crime	3.796	0.964
 n	depiction	description	3.927	0.812
@@ -207,7 +206,6 @@ v	guidebook	guide	3.567	0.923
 v	impair	damage	3.621	0.793
 v	interlink	link	3.865	0.944
 v	invigorate	strengthen	3.751	0.875
-v	manufacture	produce	3.793	0.796
 v	methodology	method	3.997	0.862
 v	minimize	reduce	3.646	0.842
 v	mitigate	reduce	3.574	0.888

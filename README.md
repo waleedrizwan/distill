@@ -7,7 +7,8 @@ sentences from a document and prints them **verbatim**, in their original order.
   sentence from the input (whitespace-normalised). With `--compress`, a
   sentence can have pieces left out, but every word it keeps is from the input,
   in order. With `--simplify`, a word can be swapped for a simpler one, but
-  only from a fixed, hand-reviewed table (`src/lexicon.tsv`).
+  only from a fixed, hand-reviewed table (`src/lexicon.tsv`). With `--split`,
+  a long sentence can become two, losing a joining "and".
 - **Deterministic.** Same input and same binary give byte-identical output.
 - **Local.** One binary plus a 90 MB model file. No network at run time.
 
@@ -41,6 +42,8 @@ distill [FILE]            summarize FILE (or stdin)
       --show-segments     print how the text was split, without summarizing
       --compress          leave out asides: parentheticals, citations, "which"/"who"
                           clauses, dash interruptions, openers like "However,"
+      --split             split long sentences at ", and" / ", but" / ";" when both
+                          halves are full clauses
       --simplify          swap hard words for simpler ones from a reviewed table
                           ("numerous" -> "many"), only where meaning barely moves
       --no-repair         don't add context sentences
@@ -176,7 +179,7 @@ on the test bills, because the words it frees go to more content. It never
 touches list labels, acronym definitions, defined terms, qualifiers such as
 "(other than ...)", quoted text, or "which" clauses in legal operative text.
 
-`--simplify` (`src/lexical.rs`) swaps words using `src/lexicon.tsv`: 223
+`--simplify` (`src/lexical.rs`) swaps words using `src/lexicon.tsv`: 221
 single-word substitutions such as "numerous" to "many", "frequently" to
 "often" and "commence" to "start", taken from SimplePPDB and kept only after
 being read by hand (`eval/lexicon-approved.txt`; rejected pairs and why are in
@@ -185,15 +188,28 @@ and leaves proper nouns, compounds, quotations and legal operative text
 alone. Each swap is kept only if the sentence's embedding stays at a cosine
 similarity of at least 0.95 to the original (`--simplify-threshold`); on the
 development summaries every swap below 0.94 was wrong and those above 0.957
-kept the meaning, though a few lost nuance or a technical sense ("manufacture
-a crisis" became "produce a crisis"; in physics, "fundamental mode" became
-"basic mode"). It does not change ROUGE. It is also rare: about 2% of news
+kept the meaning, with exceptions that were then removed from the table
+("listeria contamination" became "listeria pollution") or remain
+(in physics, "fundamental mode" became "basic mode"). It does not change ROUGE. It is also rare: 2 to 3% of news
 summary sentences and 10% of paper sentences change, bills almost never. Each
 swap replaces a word about seven times more common in news and bills. Most
 SimplePPDB single-word rules turned out to be wrong in context ("survive" to
 "die", "importation" to "export"), which is why the table is an allow-list;
 `python3 eval/build_lexicon.py` reports the candidates nobody has reviewed yet,
 most frequent first.
+
+`--split` (`src/split.rs`) turns "X, and Y" into "X. Y" (", but" and ", so"
+keep the conjunction: "X. But Y"; a semicolon becomes a full stop) when the
+sentence has at least 24 words, each part at least 8, and both parts are full
+clauses. There is no part-of-speech tagger: a clause needs a finite verb from
+closed lists (auxiliaries, modals, irregular past forms, "-ed" forms), and the
+second part must open with a subject (a pronoun, a determiner phrase, a name
+or a bare noun phrase) that reaches that verb within a few words. It never
+splits lists, numbered or lettered clauses, quotations or legal text. It is
+precise but rare: across the development and test summaries it split 7 of
+about 260 long news sentences, all correctly, and nothing in bills or papers.
+The limit is not the clause detector: few long summary sentences contain such
+a junction at all. ROUGE is unchanged.
 
 The salience weights are trained by `python3 eval/train_salience.py` on 3,000
 CNN/DailyMail and 1,500 BillSum training documents, none of which overlap the

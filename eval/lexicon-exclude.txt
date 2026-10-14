@@ -419,3 +419,5 @@ incorporate come
 globally worldwide          # pos: "globally significant" -> "worldwide significant"
 intensify increase          # meaning: "talks intensified" -> "talks increased"
 proposition proposal        # meaning: a theorem-like statement in mathematics
+contamination pollution     # meaning: "listeria contamination" -> "listeria pollution"
+manufacture produce         # meaning: "manufacturing plants", "manufacture a crisis"

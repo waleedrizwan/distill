@@ -41,7 +41,7 @@ re!(
 // Legal operative text, where a comma-bounded "which" can restrict a definition.
 re!(
     re_legal,
-    r"(?i)\b(?:shall|means|the term|is amended|are amended|is hereby|this (?:Act|section|subsection|paragraph|title|chapter)|U\.S\.C\.)\b|^\(?[a-z0-9]{1,4}\)|^``"
+    r"(?i:\b(?:shall|means|the term|is amended|are amended|is hereby|this (?:Act|section|subsection|paragraph|title|chapter)|U\.S\.C\.)\b)|^\(?(?:[a-zA-Z]|[a-z]{2}|\d{1,3}|[ivx]{2,5}|[IVX]{2,5})\)|^``"
 );
 re!(re_paren, r"\s*\(([^()\[\]]{1,200})\)");
 // "(a)", "(12)", "(iii)", "(B)": list labels and references to them.
@@ -127,6 +127,20 @@ fn clause_ok(clause: &str) -> bool {
 /// Does this read as legal operative text ("shall", "means", "is amended")?
 pub fn is_legal(text: &str) -> bool {
     re_legal().is_match(text)
+}
+
+#[cfg(test)]
+mod legal_tests {
+    use super::is_legal;
+
+    #[test]
+    fn labels_are_case_sensitive() {
+        assert!(is_legal("(a) In general.--The Secretary may issue rules."));
+        assert!(is_legal("(B) any transaction with respect to a derivative."));
+        assert!(is_legal("(12) The term covers both kinds."));
+        assert!(!is_legal("(CNN)The flight crew cited brake issues during the landing."));
+        assert!(!is_legal("(The Hollywood Reporter)Melissa Benoist is ready to fly."));
+    }
 }
 
 /// Is byte offset `pos` inside a quotation? Counts straight double quotes,

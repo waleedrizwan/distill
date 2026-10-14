@@ -4,6 +4,7 @@ mod lexical;
 mod salience;
 mod segment;
 mod select;
+mod split;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -97,6 +98,11 @@ struct Args {
     /// sentence's meaning, as the embedding model sees it, barely moves
     #[arg(long)]
     simplify: bool,
+
+    /// Split long sentences at ", and" / ", but" / ";" when both halves are
+    /// full clauses (nothing is added; see src/split.rs)
+    #[arg(long)]
+    split: bool,
 
     /// --simplify: least cosine similarity to the original sentence a swap may leave
     #[arg(long, default_value_t = 0.95)]
@@ -377,6 +383,14 @@ fn run() -> Result<()> {
             }
             display[idx] = Some(lexical::apply(&text, &kept.iter().map(|(s, _)| s).collect::<Vec<_>>()));
             swaps_made[idx] = kept.into_iter().map(|(s, sim)| (s.from, s.to, (sim * 1e4).round() / 1e4)).collect();
+        }
+    }
+    if args.split {
+        for p in picks {
+            let text = display[p.index].clone().unwrap_or_else(|| doc.sentences[p.index].text.clone());
+            if let Some(parts) = split::split(&text) {
+                display[p.index] = Some(parts);
+            }
         }
     }
     let shown = |i: usize| -> &str { display[i].as_deref().unwrap_or(&doc.sentences[i].text) };

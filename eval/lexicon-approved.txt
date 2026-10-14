@@ -171,7 +171,6 @@ achievement success
 airliner airplane
 automotive auto
 capability ability
-contamination pollution
 depiction description
 difficulty trouble
 disbursement payment
@@ -211,4 +210,3 @@ oversee manage
 reside live
 retain keep
 supersede replace
-manufacture produce
