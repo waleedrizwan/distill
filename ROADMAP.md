@@ -143,7 +143,7 @@ of the input's words, a property test enforces that.
   classifier on the Google sentence-compression data.
 
 - [x] **Lexical substitution from a fixed table (`--simplify`, `src/lexical.rs`).**
-  `src/lexicon.tsv` holds 223 single-word substitutions from SimplePPDB
+  `src/lexicon.tsv` holds 221 single-word substitutions from SimplePPDB
   (CC BY 3.0 US; attribution in the README), built by `eval/build_lexicon.py`:
   paraphrase score >= 3.5, simplification score >= 0.75, the replacement at
   least twice as frequent in the training documents, and the pair listed in
@@ -157,13 +157,32 @@ of the input's words, a property test enforces that.
   200 most frequent candidates after loosening the filters, one was usable.
   On the development summaries, every swap with similarity below 0.94 was
   wrong and those above 0.957 kept the meaning, though a few lost nuance or a
-  technical sense ("fundamental mode" in physics became "basic mode"). Effect: no ROUGE change; about 2% of news summary sentences and 10% of
+  technical sense ("fundamental mode" in physics became "basic mode"). Effect: no ROUGE change; 2 to 3% of news summary sentences and 10% of
   paper sentences change, bills almost never; each swap uses a word about
   seven times more common. Coverage grows only by reviewing more of the
   unreviewed candidates the build reports.
-- [ ] **Sentence splitting on coordination** ("X, and Y" into two sentences when
-  both halves have a subject and verb). Needs a part-of-speech tagger, so it
-  comes last and only if the first two layers prove the demand.
+- [x] **Sentence splitting on coordination (`--split`, `src/split.rs`).** Started
+  without the part-of-speech tagger planned here: clause detection uses closed
+  word lists (auxiliaries, modals, irregular past forms, "-ed" forms) and
+  subject patterns (pronouns, determiner phrases, names, bare noun phrases).
+  Splits "X, and Y" / ", but" / ", so" / ";" in sentences of 24+ words when
+  both parts are clauses; never in lists, numbered clauses, quotations or
+  legal text. Reading every split on the development and test summaries found
+  two kinds of error, both fixed with tests: numbered lists split at their
+  semicolons, and "and one that has ..." treated as a new subject. After the
+  fixes: 7 splits in about 260 long news sentences, all correct; none in bills
+  (legal text is exempt) or papers; ROUGE unchanged. A tagger would not change
+  much: few long summary sentences contain a clause-level junction at all.
+  The first two layers did not clearly prove the demand this layer was gated
+  on; it was built on request and stays opt-in.
+
+  Fixed along the way: the legal-text detector shared by all three layers
+  matched list labels case-insensitively, so "(CNN)" at the start of a news
+  article counted as a label like "(a)" and switched off clause deletion and
+  word swaps on those sentences. Labels are now case-sensitive. Two more
+  lexicon pairs were removed after reviewing the swaps this enabled
+  ("listeria contamination" -> "pollution", "manufacturing plants" ->
+  "producing plants").
 
 A small fine-tuned seq2seq model with greedy decoding and a constrained
 vocabulary stays off the roadmap until these three ship: it is the one option
