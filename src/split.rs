@@ -236,4 +236,42 @@ mod tests {
         let toks = |t: &str| words(t).into_iter().filter(|w| w != "and").collect::<Vec<_>>();
         assert_eq!(toks(&out), toks(s));
     }
+    mod props {
+        //! Nothing added: on generated sentences a split keeps every word but
+        //! the dropped "and", in order, and short or legal sentences are left
+        //! alone. No panics on arbitrary text.
+        use super::*;
+        use crate::testgen::{messy, sentence};
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(500))]
+
+            #[test]
+            fn nothing_added(s in sentence()) {
+                let n = s.split_whitespace().count();
+                let legal = crate::compress::is_legal(s.trim()) || re_label().is_match(s.trim());
+                let Some(out) = split(&s) else { return Ok(()) };
+                prop_assert!(n >= MIN_SENTENCE && !legal, "split a sentence it should leave alone: {:?}", s);
+                let keep = |t: &str| words(t).into_iter().filter(|w| w != "and").collect::<Vec<_>>();
+                prop_assert_eq!(keep(&out), keep(&s));
+                let parts: Vec<&str> = out.split(". ").collect();
+                prop_assert!(parts.len() >= 2, "{:?}", out);
+                let dropped = words(&s).len() - words(&out).len();
+                prop_assert!(dropped < parts.len(), "{:?} lost {} words", out, dropped);
+                for p in &parts {
+                    prop_assert!(p.split_whitespace().count() >= MIN_PART, "short part {:?} in {:?}", p, out);
+                }
+                for p in &parts[1..] {
+                    let f = p.chars().next().unwrap_or(' ');
+                    prop_assert!(!f.is_lowercase(), "new sentence not capitalised: {:?}", p);
+                }
+            }
+
+            #[test]
+            fn never_panics(s in messy()) {
+                let _ = split(&s);
+            }
+        }
+    }
 }

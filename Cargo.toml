@@ -16,6 +16,9 @@ regex = "1"
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 ureq = { version = "2", features = ["json"] }
 
+[dev-dependencies]
+proptest = "1"
+
 [features]
 # Faster matrix maths. macOS: --features accelerate   Intel Linux/Windows: --features mkl
 accelerate = ["candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]

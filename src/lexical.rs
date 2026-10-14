@@ -362,4 +362,63 @@ mod tests {
         // Non-ASCII text around a swap is preserved byte for byte.
         assert_eq!(all("Résumé reviewers reside in Zürich."), "Résumé reviewers live in Zürich.");
     }
+    mod props {
+        //! Each swap names a byte range holding exactly its `from`; the ranges
+        //! are ordered, disjoint and never inside a quotation; and `apply`
+        //! changes nothing outside them, for any subset of the swaps.
+        use super::*;
+        use crate::testgen::{messy, sentence};
+        use proptest::prelude::*;
+
+        fn expected(text: &str, swaps: &[&Swap]) -> String {
+            let mut out = String::new();
+            let mut p = 0;
+            for sw in swaps {
+                out.push_str(&text[p..sw.start]);
+                out.push_str(&sw.to);
+                p = sw.end;
+            }
+            out.push_str(&text[p..]);
+            out
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(500))]
+
+            #[test]
+            fn swaps_are_sound(s in sentence(), mask in prop::collection::vec(any::<bool>(), 1..8)) {
+                let c = candidates(&s);
+                prop_assert_eq!(&candidates(&s), &c, "not deterministic");
+                if crate::compress::is_legal(&s) {
+                    prop_assert!(c.is_empty(), "swaps in legal text: {:?}", c);
+                }
+                let mut last = 0;
+                for sw in &c {
+                    prop_assert!(sw.start >= last && sw.start < sw.end && sw.end <= s.len(), "bad range {:?}", sw);
+                    prop_assert_eq!(&s[sw.start..sw.end], sw.from.as_str());
+                    prop_assert!(sw.from.chars().all(|ch| ch.is_ascii_alphabetic() || ch == ' '), "{:?}", sw);
+                    prop_assert!(!sw.to.is_empty() && sw.to.trim() == sw.to && !sw.to.contains("  "), "{:?}", sw);
+                    prop_assert_ne!(sw.to.to_lowercase(), sw.from.to_lowercase(), "swap to itself");
+                    prop_assert_eq!(
+                        sw.from.chars().next().is_some_and(char::is_uppercase),
+                        sw.to.chars().next().is_some_and(char::is_uppercase),
+                        "case changed: {:?}", sw
+                    );
+                    prop_assert!(!crate::compress::inside_quote(&s, sw.start), "swap inside a quotation: {:?}", sw);
+                    last = sw.end;
+                }
+                prop_assert_eq!(apply(&s, &[]), s.clone());
+                let all: Vec<&Swap> = c.iter().collect();
+                prop_assert_eq!(apply(&s, &all), expected(&s, &all));
+                let some: Vec<&Swap> = c.iter().zip(mask.iter().cycle()).filter(|(_, &m)| m).map(|(sw, _)| sw).collect();
+                prop_assert_eq!(apply(&s, &some), expected(&s, &some));
+            }
+
+            #[test]
+            fn never_panics(s in messy()) {
+                let c = candidates(&s);
+                let _ = apply(&s, &c.iter().collect::<Vec<_>>());
+            }
+        }
+    }
 }

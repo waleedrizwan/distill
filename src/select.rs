@@ -977,4 +977,85 @@ mod tests {
         assert_eq!(selected(&select(&doc, &e, &p(-5.0))), vec![0]);
         assert_eq!(selected(&select(&doc, &e, &p(5.0))), vec![2]);
     }
+    mod props {
+        //! Selection invariants on generated documents with random budgets and
+        //! knobs: document order, no duplicates, only candidates, justified
+        //! context, budgets held, same input same output.
+        use super::*;
+        use crate::testgen::document;
+        use proptest::prelude::*;
+
+        fn params() -> impl Strategy<Value = Params> {
+            (
+                0usize..12,
+                prop::option::weighted(0.5, 0usize..300),
+                0f32..=1.0,
+                prop::bool::ANY,
+                0f32..=1.0,
+                0f32..=1.0,
+                0f32..=1.0,
+                0f32..=1.0,
+                prop::bool::ANY,
+            )
+                .prop_map(|(budget, word_budget, lambda, centroid, backward, lead, section_weight, dependence_penalty, repair)| Params {
+                    budget,
+                    word_budget,
+                    lambda,
+                    centrality: if centroid { Centrality::Centroid } else { Centrality::Directed },
+                    backward,
+                    lead,
+                    section_weight,
+                    dependence_penalty,
+                    repair,
+                    ..Default::default()
+                })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(300))]
+
+            #[test]
+            fn invariants(text in document(), p in params()) {
+                let doc = parse(&text, &ParseOptions::default());
+                let e = embed(&doc);
+                let n = e.len();
+                let sel = select(&doc, &e, &p);
+                let what = format!(
+                    "budget={} words={:?} lambda={} {:?} backward={} lead={} section={} penalty={} repair={}",
+                    p.budget, p.word_budget, p.lambda, p.centrality, p.backward, p.lead, p.section_weight, p.dependence_penalty, p.repair
+                );
+                prop_assert!(sel.picks.windows(2).all(|w| w[0].index < w[1].index), "{}", what);
+                let sel_idx = selected(&sel);
+                if p.word_budget.is_none() {
+                    prop_assert_eq!(sel_idx.len(), p.budget.min(n), "{}", what);
+                } else if p.word_budget != Some(0) && n > 0 {
+                    // Shorter than any sentence: still one sentence.
+                    prop_assert!(!sel_idx.is_empty(), "{}", what);
+                }
+                let mut ranks: Vec<usize> = sel.picks.iter().filter(|p| p.kind == Kind::Selected).map(|p| p.rank).collect();
+                ranks.sort();
+                prop_assert_eq!(ranks, (0..sel_idx.len()).collect::<Vec<_>>(), "{}", what);
+                for pk in &sel.picks {
+                    prop_assert!(pk.group < sel.groups.len(), "{}", what);
+                    prop_assert!(pk.score.is_finite(), "{}", what);
+                    match pk.kind {
+                        Kind::Selected => prop_assert!(doc.sentences[pk.index].candidate, "{}: non-candidate selected", what),
+                        // Context comes before the pick it supports, in the same section or as its list's lead-in.
+                        Kind::Context => prop_assert!(
+                            sel_idx.iter().any(|&s| s > pk.index
+                                && (s - pk.index <= 3 && doc.sentences[s].section == doc.sentences[pk.index].section
+                                    || doc.sentences[s].lead_in.is_some())),
+                            "{}: stray context sentence {}", what, pk.index
+                        ),
+                    }
+                }
+                if let Some(w) = p.word_budget {
+                    let total: usize = sel.picks.iter().map(|p| doc.sentences[p.index].words).sum();
+                    prop_assert!(total <= w || sel_idx.len() == 1, "{}: {} words", what, total);
+                }
+                let again = select(&doc, &e, &p);
+                prop_assert_eq!(format!("{:?}", sel.picks), format!("{:?}", again.picks), "{}", what);
+            }
+        }
+    }
 }

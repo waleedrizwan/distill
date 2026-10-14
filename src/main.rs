@@ -1,10 +1,4 @@
-mod compress;
-mod embed;
-mod lexical;
-mod salience;
-mod segment;
-mod select;
-mod split;
+use distill::{compress, embed, lexical, salience, segment, select, split};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;

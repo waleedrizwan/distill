@@ -1203,4 +1203,55 @@ mod tests {
             assert_eq!(format!("{a:?}"), format!("{b:?}"));
         }
     }
+    mod props {
+        //! The splitter loses no text, and `parse` keeps the invariants
+        //! `select.rs` relies on, on generated documents and arbitrary strings.
+        use super::*;
+        use crate::testgen::{document, messy, paragraph};
+        use proptest::prelude::*;
+
+        fn texts(doc: &Document) -> Vec<(String, bool, usize)> {
+            doc.sentences.iter().map(|s| (s.text.clone(), s.candidate, s.section)).collect()
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(300))]
+
+            #[test]
+            fn splitting_loses_no_text(p in prop_oneof![paragraph(), messy()]) {
+                let para = collapse_ws(&p);
+                let parts = split_sentences(&para);
+                prop_assert_eq!(non_space(&parts.concat()), non_space(&para));
+            }
+
+            #[test]
+            fn parse_is_well_formed(d in prop_oneof![3 => document(), 1 => messy()]) {
+                for opts in [ParseOptions::default(), ParseOptions { min_words: 1, dehyphenate: true }] {
+                    let doc = parse(&d, &opts);
+                    assert_well_formed(&doc, &opts);
+                    prop_assert_eq!(format!("{:?}", parse(&d, &opts)), format!("{:?}", doc), "not deterministic");
+                }
+            }
+
+            #[test]
+            fn sentences_are_verbatim(d in document()) {
+                // Every sentence is the input's text, whitespace aside. (List
+                // items lose their markers; arbitrary strings can also lose
+                // soft hyphens and Markdown syntax, so this is for documents.)
+                let doc = parse(&d, &ParseOptions::default());
+                let flat = non_space(&d);
+                for s in doc.sentences.iter().filter(|s| !s.list_item) {
+                    prop_assert!(flat.contains(&non_space(&s.text)), "not verbatim: {:?}", s.text);
+                }
+            }
+
+            #[test]
+            fn line_endings_do_not_matter(d in document()) {
+                let opts = ParseOptions::default();
+                let lf = texts(&parse(&d, &opts));
+                prop_assert_eq!(texts(&parse(&d.replace('\n', "\r\n"), &opts)), lf.clone());
+                prop_assert_eq!(texts(&parse(&d.replace('\n', "\r"), &opts)), lf);
+            }
+        }
+    }
 }
