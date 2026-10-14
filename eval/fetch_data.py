@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Download the frozen evaluation sample into eval/data/ and verify it.
 
-The sample is a fixed slice of three public test sets. The text itself is not
-committed (the news articles are copyrighted); instead every document's SHA-256
-is in eval/manifest.tsv, so a run that scores different text fails loudly.
+The sample is a fixed slice of three public test sets, plus larger development
+sets for tuning. The text itself is not committed (the news articles are
+copyrighted); instead every document's SHA-256 is in eval/manifest.tsv, so a
+run that scores different text fails loudly.
 
     python3 eval/fetch_data.py                   # download + verify
     python3 eval/fetch_data.py --write-manifest  # (re)create the manifest
@@ -31,6 +32,10 @@ SETS = {
     "cnndm": ("abisee/cnn_dailymail", "3.0.0", "test", 0, 100, "article", "highlights", "id"),
     "billsum": ("FiscalNote/billsum", "default", "test", 0, 60, "text", "summary", None),
     "arxiv": ("ccdv/arxiv-summarization", "section", "test", 0, 10, "article", "abstract", None),
+    # Development sets: tune knobs on these, report on the test sets above.
+    # BillSum has no validation split, so its dev set comes from train.
+    "cnndm-dev": ("abisee/cnn_dailymail", "3.0.0", "validation", 0, 500, "article", "highlights", "id"),
+    "billsum-dev": ("FiscalNote/billsum", "default", "train", 0, 300, "text", "summary", None),
 }
 
 
@@ -73,12 +78,12 @@ def fetch(name):
             break
         for idx, row in batch:
             ref = row[ref_f]
-            if name == "cnndm":
+            if name.startswith("cnndm"):
                 # Highlights are one sentence per line without final periods on some lines.
                 ref = " ".join(line.strip() for line in ref.splitlines() if line.strip())
             docs.append(
                 {
-                    "id": row[id_f] if id_f else f"{name}-{split}-{idx:05d}",
+                    "id": row[id_f] if id_f else f"{name.split('-')[0]}-{split}-{idx:05d}",
                     "text": row[text_f],
                     "reference": ref,
                 }

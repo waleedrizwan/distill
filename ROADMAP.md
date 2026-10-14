@@ -37,18 +37,35 @@ picks score higher. Nothing later can be judged until this exists.
 ## Milestone 1: cheap ranking wins
 
 One pull request each, ordered by expected payoff per hour. Any change that
-does not move the table is dropped.
+does not move the table is dropped. Tuned on the development sets (500 news
+articles, 300 bills); a change counts only when the paired bootstrap 95%
+interval for ROUGE-2 excludes zero.
 
-- [ ] **Length normalisation.** Centrality rewards long sentences because they
-  touch more topics. Divide relevance by a soft function of word count, and/or
-  run MMR as gain per word under the word budget.
-- [ ] **Dangling-sentence policy.** Pulling in the previous sentence for every
-  "This..." opener spends up to half the budget on context. Try a harsher
-  dependence penalty so a self-contained near-duplicate wins instead, and count
-  context sentences against the word budget.
-- [ ] **Boilerplate filter.** A deterministic pre-pass in `src/segment.rs` that
-  drops navigation, cookie notices and licence footers before candidate
-  selection. Add scraped-page fixtures to `eval/` so it is measured too.
+- [x] **Context counts against the word budget.** A pick now pays for the
+  context sentences repair adds for it, so `--words N` bounds the whole
+  summary. Bills drop from 234 to 185 words on the development set for a
+  ROUGE-2 change of -0.31 (interval -0.92 to +0.32, not significant). Kept as
+  a correctness fix: without it, equal-length comparisons are not equal.
+- [x] **Length normalisation: dropped.** Lowering relevance by log length did
+  nothing at equal length (within ±0.2 in both directions), because the word
+  budget already charges long sentences for their words. Picking by gain per
+  word was clearly worse: it favours short, low-content sentences.
+- [x] **Dangling-sentence policy: no change.** Dependence penalties from 0.15
+  to 0.6, with and without repair, and the lead, boost, lambda and
+  section-weight knobs all stayed within noise on bills. Raising the penalty
+  was significantly worse on news. Turning repair off was significantly worse
+  on bills. Defaults are unchanged.
+- [x] **Boilerplate filter.** A deterministic pre-pass in `src/segment.rs`
+  drops consent banners, "Read more:" and "Click here" links, share, follow and
+  newsletter prompts, link menus, copyright and licence footers, bylines and
+  datelines as headings, and sections such as "Related articles". On all eval
+  data it removes 44 of 29,217 candidate sentences, all of them genuine
+  boilerplate. News ROUGE-2 +0.12 on the development set (interval +0.02 to
+  +0.23), bills unchanged. `samples/web-article.txt` is the fixture.
+
+**Gate result.** At equal length on the test sets, distill is within noise of
+the first sentences on news and about one ROUGE-2 point behind them on bills.
+The gate below is not met, so Milestone 2 goes ahead.
 
 ## Milestone 2: embedding model swap
 
@@ -104,4 +121,4 @@ that can reorder meaning.
 
 If length normalisation and the dangling-sentence changes beat lead-3 on news by
 a clear margin at equal length, Milestone 2 becomes optional and Milestone 4 can
-start in parallel.
+start in parallel. (Not met; see Milestone 1.)
