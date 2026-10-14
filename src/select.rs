@@ -725,4 +725,256 @@ mod tests {
         let sel = select(&doc, &e, &Params { word_budget: Some(1000), repair: false, ..Default::default() });
         assert_eq!(sel.picks.len(), 4);
     }
+
+    use crate::segment::{parse, ParseOptions};
+
+    /// A stand-in for the encoder: hashed bag of lowercase words, unit length.
+    /// Sentences sharing words get similar vectors, which is all selection needs.
+    fn bow(text: &str) -> Vec<f32> {
+        use std::hash::{Hash, Hasher};
+        let mut v = vec![0f32; 64];
+        for w in text.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 2) {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            w.to_lowercase().hash(&mut h);
+            v[(h.finish() % 64) as usize] += 1.0;
+        }
+        v[0] += 1e-3; // never the zero vector
+        normalize(&mut v);
+        v
+    }
+
+    fn embed(doc: &Document) -> Vec<Vec<f32>> {
+        doc.sentences.iter().filter(|s| s.candidate).map(|s| bow(&s.text)).collect()
+    }
+
+    fn selected(sel: &Selection) -> Vec<usize> {
+        sel.picks.iter().filter(|p| p.kind == Kind::Selected).map(|p| p.index).collect()
+    }
+
+    fn unit(v: &[f32]) -> Vec<f32> {
+        let mut v = v.to_vec();
+        normalize(&mut v);
+        v
+    }
+
+    #[test]
+    fn invariants_on_real_documents() {
+        let samples = [
+            include_str!("../samples/web-article.txt"),
+            include_str!("../samples/us-bill.txt"),
+            include_str!("../samples/apache-license.txt"),
+        ];
+        for text in samples {
+            let doc = parse(text, &ParseOptions::default());
+            let e = embed(&doc);
+            let n = e.len();
+            for centrality in [Centrality::Directed, Centrality::Centroid] {
+                for (budget, word_budget) in [(1, None), (3, None), (8, None), (n + 5, None), (0, Some(40)), (0, Some(150))] {
+                    let p = Params { budget, word_budget, centrality, ..Default::default() };
+                    let sel = select(&doc, &e, &p);
+                    let what = format!("{centrality:?} budget={budget} words={word_budget:?}");
+
+                    // Output is in document order, without duplicates.
+                    assert!(sel.picks.windows(2).all(|w| w[0].index < w[1].index), "{what}");
+                    let sel_idx = selected(&sel);
+                    if word_budget.is_none() {
+                        assert_eq!(sel_idx.len(), budget.min(n), "{what}");
+                    }
+                    let mut ranks: Vec<usize> = sel.picks.iter().filter(|p| p.kind == Kind::Selected).map(|p| p.rank).collect();
+                    ranks.sort();
+                    assert_eq!(ranks, (0..sel_idx.len()).collect::<Vec<_>>(), "{what}");
+                    for pk in &sel.picks {
+                        assert!(pk.group < sel.groups.len(), "{what}");
+                        assert!(pk.score.is_finite(), "{what}");
+                        match pk.kind {
+                            Kind::Selected => assert!(doc.sentences[pk.index].candidate, "{what}: non-candidate selected"),
+                            // Context comes before the pick it supports, in the same section or as its list's lead-in.
+                            Kind::Context => assert!(
+                                sel_idx.iter().any(|&s| s > pk.index
+                                    && (s - pk.index <= 3 && doc.sentences[s].section == doc.sentences[pk.index].section
+                                        || doc.sentences[s].lead_in.is_some())),
+                                "{what}: stray context sentence {}",
+                                pk.index
+                            ),
+                        }
+                    }
+                    if let Some(w) = word_budget {
+                        let total: usize = sel.picks.iter().map(|p| doc.sentences[p.index].words).sum();
+                        assert!(total <= w || sel_idx.len() == 1, "{what}: {total} words");
+                    }
+                    // Same input, same output.
+                    let again = select(&doc, &e, &p);
+                    assert_eq!(format!("{:?}", sel.picks), format!("{:?}", again.picks), "{what}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_and_zero_budget() {
+        let doc = parse("", &ParseOptions::default());
+        assert!(select(&doc, &[], &Params::default()).picks.is_empty());
+        let doc = parse("A perfectly ordinary sentence with enough words in it.", &ParseOptions::default());
+        let e = embed(&doc);
+        assert!(select(&doc, &e, &Params { budget: 0, ..Default::default() }).picks.is_empty());
+        assert!(select(&doc, &e, &Params { word_budget: Some(0), ..Default::default() }).picks.is_empty());
+        assert_eq!(selected(&select(&doc, &e, &Params { budget: 10, ..Default::default() })), vec![0]);
+    }
+
+    #[test]
+    fn central_beats_outlier() {
+        // Three sentences on one topic and one off-topic: with relevance only,
+        // the single pick must come from the topic cluster.
+        let doc = parse(
+            "The river flooded the old town after heavy rain this week. Heavy rain made the river flood the town again this week. The town council blamed the river flooding on the heavy rain. A local bakery won a national award for its sourdough bread.",
+            &ParseOptions::default(),
+        );
+        let e = vec![unit(&[1.0, 0.1, 0.0]), unit(&[1.0, 0.0, 0.1]), unit(&[0.9, 0.1, 0.1]), unit(&[0.0, 0.0, 1.0])];
+        for centrality in [Centrality::Directed, Centrality::Centroid] {
+            let p = Params { budget: 1, lambda: 1.0, lead: 0.0, repair: false, centrality, ..Default::default() };
+            let picks = selected(&select(&doc, &e, &p));
+            assert_eq!(picks.len(), 1);
+            assert_ne!(picks[0], 3, "{centrality:?} picked the outlier");
+        }
+        // With diversity weighted heavily, a second pick goes to the outlier
+        // rather than another near-duplicate.
+        let p = Params { budget: 2, lambda: 0.3, repair: false, ..Default::default() };
+        assert!(selected(&select(&doc, &e, &p)).contains(&3));
+    }
+
+    #[test]
+    fn sections_share_the_budget() {
+        // Section A's sentences are all more central than section B's, but
+        // with two equal sections and a budget of two, each gets one.
+        let a = "Alpha topic sentence number one has plenty of words. Alpha topic sentence number two has plenty of words. Alpha topic sentence number three has plenty of words.";
+        let b = "Beta subject line number one also has enough words. Beta subject line number two also has enough words. Beta subject line number three also has enough words.";
+        let doc = parse(&format!("# Report\n\n## Part A\n\n{a}\n\n## Part B\n\n{b}\n"), &ParseOptions::default());
+        let e = vec![
+            unit(&[1.0, 0.0, 0.05]),
+            unit(&[1.0, 0.05, 0.0]),
+            unit(&[1.0, 0.02, 0.02]),
+            unit(&[0.5, 1.0, 0.0]),
+            unit(&[0.5, 0.9, 0.1]),
+            unit(&[0.5, 1.0, 0.1]),
+        ];
+        let sel = select(&doc, &e, &Params { budget: 2, repair: false, ..Default::default() });
+        let sections: Vec<usize> = selected(&sel).iter().map(|&i| doc.sentences[i].section).collect();
+        assert_eq!(sections.len(), 2);
+        assert_ne!(sections[0], sections[1], "both picks from one section: {sections:?}");
+        assert!(sel.groups.iter().any(|g| g.as_deref() == Some("Part A")));
+        assert!(sel.groups.iter().any(|g| g.as_deref() == Some("Part B")));
+    }
+
+    #[test]
+    fn repair_brings_in_antecedent() {
+        let doc = parse(
+            "The committee approved a new budget for the city parks. This decision surprised many residents who expected cuts. Separately, the library extended its opening hours on weekends.",
+            &ParseOptions::default(),
+        );
+        // The dangling sentence sits between the other two, so it is the most central.
+        let e = vec![unit(&[1.0, 0.0, 0.0]), unit(&[1.0, 1.0, 1.0]), unit(&[0.0, 0.0, 1.0])];
+        let base = Params { budget: 1, lambda: 1.0, dependence_penalty: 0.0, lead: 0.0, centrality: Centrality::Centroid, ..Default::default() };
+        let on = select(&doc, &e, &base);
+        assert_eq!(selected(&on), vec![1]);
+        let ctx: Vec<(usize, Kind)> = on.picks.iter().map(|p| (p.index, p.kind)).collect();
+        assert_eq!(ctx, vec![(0, Kind::Context), (1, Kind::Selected)]);
+        let off = select(&doc, &e, &Params { repair: false, ..base });
+        assert_eq!(off.picks.iter().map(|p| p.index).collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn repair_stops_at_section_boundary() {
+        let doc = parse(
+            "## One\n\nThe committee approved a new budget for the city parks.\n\n## Two\n\nThis decision surprised many residents who expected cuts. Separately, the library extended its opening hours on weekends.\n",
+            &ParseOptions::default(),
+        );
+        let e = vec![unit(&[1.0, 0.0, 0.0]), unit(&[1.0, 1.0, 1.0]), unit(&[0.0, 0.0, 1.0])];
+        let p = Params { budget: 1, lambda: 1.0, dependence_penalty: 0.0, lead: 0.0, centrality: Centrality::Centroid, ..Default::default() };
+        let sel = select(&doc, &e, &p);
+        assert_eq!(selected(&sel), vec![1], "the dangling sentence must be the pick for this test to mean anything");
+        assert!(sel.picks.iter().all(|p| p.kind == Kind::Selected), "context pulled across a heading: {:?}", sel.picks);
+    }
+
+    #[test]
+    fn list_item_keeps_its_lead_in() {
+        // Items long enough that the list is not folded into its lead-in.
+        let item = "the party shall deliver all of the goods described in the relevant schedule on time and in full to the premises named by the other party in writing before the delivery date";
+        let text = format!("The Supplier agrees to the following obligations:\n(a) {item};\n(b) {item};\n(c) {item};\n(d) {item}.\n");
+        let doc = parse(&text, &ParseOptions::default());
+        let lead = doc.sentences.iter().position(|s| s.lead_in.is_none()).unwrap();
+        let item_idx: Vec<usize> = doc.sentences.iter().filter(|s| s.lead_in == Some(lead)).map(|s| s.index).collect();
+        assert!(item_idx.len() >= 4, "{:#?}", doc.sentences);
+        // The other sentences point along different axes and the last item sits
+        // between them all, so it is the most central and gets picked.
+        let last = *item_idx.last().unwrap();
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let e: Vec<Vec<f32>> = doc
+            .sentences
+            .iter()
+            .filter(|s| s.candidate)
+            .map(|s| if s.index == last { unit(&[1.0, 1.0, 1.0]) } else { unit(&axes[s.index % 3]) })
+            .collect();
+        let p = Params { budget: 1, lambda: 1.0, dependence_penalty: 0.0, lead: 0.0, centrality: Centrality::Centroid, ..Default::default() };
+        let sel = select(&doc, &e, &p);
+        assert_eq!(selected(&sel), vec![last]);
+        assert!(sel.picks.iter().any(|p| p.index == lead && p.kind == Kind::Context), "{:?}", sel.picks);
+    }
+
+    #[test]
+    fn word_cost_overrides_length() {
+        // Two long sentences; compression makes the second cheap. With costs
+        // supplied, a budget that fits only one uncompressed sentence fits both.
+        let doc = parse(
+            "The first sentence is long and has a great many words in it for this test. The second sentence is also long and has a great many words in it for this test.",
+            &ParseOptions::default(),
+        );
+        let e = vec![unit(&[1.0, 0.0]), unit(&[0.0, 1.0])];
+        let w = doc.sentences[0].words;
+        let base = Params { word_budget: Some(w + 6), repair: false, ..Default::default() };
+        assert_eq!(selected(&select(&doc, &e, &base)).len(), 1);
+        let cheap = Params { word_cost: Some(vec![w, 6]), ..base };
+        assert_eq!(selected(&select(&doc, &e, &cheap)), vec![0, 1]);
+    }
+
+    #[test]
+    fn features_match_the_head_layout() {
+        let doc = parse(include_str!("../samples/web-article.txt"), &ParseOptions::default());
+        let e = embed(&doc);
+        let sel = select(&doc, &e, &Params { want_features: true, ..Default::default() });
+        assert_eq!(sel.features.len(), e.len());
+        let cand: Vec<usize> = doc.sentences.iter().filter(|s| s.candidate).map(|s| s.index).collect();
+        for ((si, f), (want, emb)) in sel.features.iter().zip(cand.iter().zip(&e)) {
+            assert_eq!(si, want);
+            assert_eq!(f.len(), crate::salience::HAND_FEATURES.len() + emb.len());
+            assert_eq!(&f[crate::salience::HAND_FEATURES.len()..], emb.as_slice());
+            assert!(f.iter().all(|x| x.is_finite()));
+        }
+        // Features are not computed unless asked for.
+        assert!(select(&doc, &e, &Params::default()).features.is_empty());
+    }
+
+    #[test]
+    fn salience_head_steers_selection() {
+        // A head that only looks at "position" (feature 2) with negative weight
+        // prefers the earliest sentence; with positive weight, the latest.
+        let doc = parse(
+            "Alpha beta gamma delta epsilon zeta eta theta. Completely different words appear in this one here. Yet another unrelated sentence about something else entirely.",
+            &ParseOptions::default(),
+        );
+        let e = vec![unit(&[1.0, 0.0, 0.0]), unit(&[0.0, 1.0, 0.0]), unit(&[0.0, 0.0, 1.0])];
+        let head = |w: f32| {
+            let dim = crate::salience::HAND_FEATURES.len() + 3;
+            let mut weights = vec![0.0; dim];
+            weights[2] = w;
+            let json = serde_json::json!({
+                "encoder": {"hidden_size": 3, "num_hidden_layers": 1, "weights_bytes": 1},
+                "features": crate::salience::HAND_FEATURES,
+                "mean": vec![0.0; dim], "std": vec![1.0; dim], "weights": weights, "bias": 0.0,
+            });
+            std::sync::Arc::new(Head::parse(&json.to_string()).unwrap())
+        };
+        let p = |w: f32| Params { budget: 1, lead: 0.0, salience: Some(head(w)), salience_weight: 1.0, repair: false, ..Default::default() };
+        assert_eq!(selected(&select(&doc, &e, &p(-5.0))), vec![0]);
+        assert_eq!(selected(&select(&doc, &e, &p(5.0))), vec![2]);
+    }
 }

@@ -1045,4 +1045,123 @@ mod tests {
         assert_eq!(doc.sentences[0].text, "This is a sentence that has been wrapped across two lines by an editor.");
         assert_ne!(doc.sentences[1].paragraph, doc.sentences[2].paragraph);
     }
+
+    const SAMPLES: &[&str] = &[
+        include_str!("../samples/web-article.txt"),
+        include_str!("../samples/us-bill.txt"),
+        include_str!("../samples/apache-license.txt"),
+    ];
+
+    /// Invariants `select.rs` relies on without checking.
+    fn assert_well_formed(doc: &Document, opts: &ParseOptions) {
+        for (i, s) in doc.sentences.iter().enumerate() {
+            assert_eq!(s.index, i, "sentence indices are not consecutive");
+            assert!(s.section < doc.sections.len());
+            assert!(doc.sections[s.section].sentences.contains(&i), "sentence {i} outside its section's range");
+            assert_eq!(s.words, s.text.split_whitespace().count(), "word count of {:?}", s.text);
+            assert!(!s.text.is_empty() && s.text == s.text.trim() && !s.text.contains("  ") && !s.text.contains('\n'));
+            if let Some(l) = s.lead_in {
+                assert!(l < i, "lead-in {l} does not precede item {i}");
+                assert!(s.list_item);
+            }
+            if s.candidate {
+                assert!(s.words >= opts.min_words, "short candidate {:?}", s.text);
+                assert!(!doc.sections[s.section].skip, "candidate in a skipped section: {:?}", s.text);
+            }
+            if i > 0 {
+                let p = &doc.sentences[i - 1];
+                assert!(p.section <= s.section && p.paragraph <= s.paragraph, "order broken at {i}");
+            }
+        }
+        // Section ranges tile the sentence list in order.
+        let mut next = 0;
+        for sec in &doc.sections {
+            assert_eq!(sec.sentences.start, next, "{:#?}", doc.sections);
+            next = sec.sentences.end;
+        }
+        assert_eq!(next, doc.sentences.len());
+    }
+
+    fn non_space(s: &str) -> String {
+        s.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    #[test]
+    fn samples_are_well_formed() {
+        for opts in [ParseOptions::default(), ParseOptions { min_words: 1, dehyphenate: true }] {
+            for text in SAMPLES {
+                let doc = parse(text, &opts);
+                assert!(doc.sentences.iter().filter(|s| s.candidate).count() >= 5);
+                assert_well_formed(&doc, &opts);
+            }
+        }
+    }
+
+    #[test]
+    fn splitting_loses_no_text() {
+        // Sentences are verbatim: rejoined, they give back the paragraph.
+        for text in SAMPLES {
+            for para in text.split("\n\n") {
+                let para = collapse_ws(para);
+                let joined: String = split_sentences(&para).concat();
+                assert_eq!(non_space(&joined), non_space(&para));
+            }
+        }
+        for s in ["", " ", "...", "?!", "No terminal punctuation", "Ends with an ellipsis\u{2026}", "\"\"", "``''"] {
+            assert_eq!(non_space(&split_sentences(s).concat()), non_space(s), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn degenerate_input() {
+        for raw in ["", "\n\n\n", "   \t  ", "#", "# \n", "- \n- \n", "\u{000C}\u{00AD}"] {
+            let doc = parse(raw, &ParseOptions::default());
+            assert!(doc.sentences.iter().all(|s| !s.candidate), "{raw:?}: {:#?}", doc.sentences);
+            assert_well_formed(&doc, &ParseOptions::default());
+        }
+    }
+
+    #[test]
+    fn line_endings_do_not_matter() {
+        let lf = SAMPLES[0];
+        let texts = |d: Document| d.sentences.into_iter().map(|s| (s.text, s.section, s.candidate)).collect::<Vec<_>>();
+        let opts = ParseOptions::default();
+        assert_eq!(texts(parse(&lf.replace('\n', "\r\n"), &opts)), texts(parse(lf, &opts)));
+        assert_eq!(texts(parse(&lf.replace('\n', "\r"), &opts)), texts(parse(lf, &opts)));
+    }
+
+    #[test]
+    fn dehyphenation() {
+        let raw = "The committee examined the environ-\nmental impact of the proposed dam carefully.";
+        let on = parse(raw, &ParseOptions { dehyphenate: true, ..Default::default() });
+        assert_eq!(on.sentences[0].text, "The committee examined the environmental impact of the proposed dam carefully.");
+        let off = parse(raw, &ParseOptions::default());
+        assert!(off.sentences[0].text.contains("environ-"), "{:?}", off.sentences[0].text);
+    }
+
+    #[test]
+    fn non_candidates() {
+        let opts = ParseOptions::default();
+        for (s, why) in [
+            ("What exactly did the committee decide on that day?", "question"),
+            ("Figure 3: Accuracy of every model on the test set.", "caption"),
+            ("[12] World Health Organization report on air quality and health, 2021 edition.", "bibliography entry"),
+            ("This section describes the method in more detail.", "signposting"),
+            ("The following items are included in the package:", "lead-in"),
+            ("12.5 33.1 47.9 88.0 91.2 14.4 63.0", "numbers"),
+            ("Too short to matter.", "short"),
+        ] {
+            let doc = parse(s, &opts);
+            assert!(doc.sentences.iter().all(|x| !x.candidate), "{why} is a candidate: {s}");
+        }
+    }
+
+    #[test]
+    fn deterministic() {
+        for text in SAMPLES {
+            let a = parse(text, &ParseOptions::default());
+            let b = parse(text, &ParseOptions::default());
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
 }
