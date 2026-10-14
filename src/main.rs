@@ -1,5 +1,6 @@
 mod compress;
 mod embed;
+mod lexical;
 mod salience;
 mod segment;
 mod select;
@@ -91,6 +92,16 @@ struct Args {
     #[arg(long)]
     compress: bool,
 
+    /// Replace hard words with simpler ones from a fixed, reviewed table
+    /// (src/lexicon.tsv, from SimplePPDB). A swap is kept only if the
+    /// sentence's meaning, as the embedding model sees it, barely moves
+    #[arg(long)]
+    simplify: bool,
+
+    /// --simplify: least cosine similarity to the original sentence a swap may leave
+    #[arg(long, default_value_t = 0.95)]
+    simplify_threshold: f32,
+
     /// Don't print section headings
     #[arg(long)]
     no_headings: bool,
@@ -134,6 +145,9 @@ struct JsonSentence<'a> {
     /// With --compress: the sentence before compression, when it was shortened.
     #[serde(skip_serializing_if = "Option::is_none")]
     original: Option<&'a str>,
+    /// With --simplify: (word, replacement, similarity of the sentence after the swap).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    substitutions: Vec<(String, String, f32)>,
 }
 
 #[derive(Serialize)]
@@ -257,7 +271,6 @@ fn run() -> Result<()> {
                 .collect(),
         );
     }
-    let shown = |i: usize| -> &str { shortened[i].as_deref().unwrap_or(&doc.sentences[i].text) };
     let mut head_note = "salience head off";
     if params.salience_weight > 0.0 {
         match salience::Head::builtin() {
@@ -293,6 +306,80 @@ fn run() -> Result<()> {
         return Ok(());
     }
     let picks = &selection.picks;
+
+    // What each picked sentence will print as: compressed, then simplified.
+    let mut display: Vec<Option<String>> = shortened.clone();
+    let mut swaps_made: Vec<Vec<(String, String, f32)>> = vec![Vec::new(); doc.sentences.len()];
+    if args.simplify {
+        let base = |i: usize| display[i].clone().unwrap_or_else(|| doc.sentences[i].text.clone());
+        let mut jobs: Vec<(usize, String, Vec<lexical::Swap>)> = Vec::new();
+        for p in picks {
+            let text = base(p.index);
+            let c = lexical::candidates(&text);
+            if !c.is_empty() {
+                jobs.push((p.index, text, c));
+            }
+        }
+        // One embedding batch: each sentence, then each sentence with one swap.
+        let mut texts: Vec<String> = Vec::new();
+        for (_, text, c) in &jobs {
+            texts.push(text.clone());
+            for sw in c {
+                texts.push(lexical::apply(text, &[sw]));
+            }
+        }
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let vecs = if refs.is_empty() { Vec::new() } else { embedder.embed(&refs, args.batch_size)? };
+        let mut at = 0;
+        // (sentence index, text before swaps, swaps that passed with their similarity)
+        type Passed = (usize, String, Vec<(lexical::Swap, f32)>);
+        let mut combined: Vec<Passed> = Vec::new();
+        for (idx, text, c) in jobs {
+            let n = c.len();
+            let orig = &vecs[at];
+            let mut kept: Vec<(lexical::Swap, f32)> = Vec::new();
+            for (k, sw) in c.into_iter().enumerate() {
+                let sim = embed::dot(orig, &vecs[at + 1 + k]);
+                if sim >= args.simplify_threshold {
+                    kept.push((sw, sim));
+                }
+            }
+            at += 1 + n;
+            combined.push((idx, text, kept));
+        }
+        // Several swaps in one sentence must also pass together; otherwise
+        // keep only the single best one.
+        let mut multi: Vec<(usize, String)> = Vec::new();
+        for (idx, text, kept) in &combined {
+            if kept.len() > 1 {
+                multi.push((*idx, lexical::apply(text, &kept.iter().map(|(s, _)| s).collect::<Vec<_>>())));
+            }
+        }
+        let mut pair_texts: Vec<&str> = Vec::new();
+        for (idx, all) in &multi {
+            let text = &combined.iter().find(|(i, ..)| i == idx).expect("job").1;
+            pair_texts.push(text);
+            pair_texts.push(all);
+        }
+        let pair_vecs = if pair_texts.is_empty() { Vec::new() } else { embedder.embed(&pair_texts, args.batch_size)? };
+        for (idx, text, mut kept) in combined {
+            if kept.is_empty() {
+                continue;
+            }
+            if kept.len() > 1 {
+                let m = multi.iter().position(|(i, _)| *i == idx).expect("multi");
+                let sim = embed::dot(&pair_vecs[2 * m], &pair_vecs[2 * m + 1]);
+                if sim < args.simplify_threshold {
+                    // Strict '>' keeps the earliest swap on ties.
+                    let best = kept.iter().enumerate().fold(0, |b, (k, (_, s))| if *s > kept[b].1 { k } else { b });
+                    kept = vec![kept.swap_remove(best)];
+                }
+            }
+            display[idx] = Some(lexical::apply(&text, &kept.iter().map(|(s, _)| s).collect::<Vec<_>>()));
+            swaps_made[idx] = kept.into_iter().map(|(s, sim)| (s.from, s.to, (sim * 1e4).round() / 1e4)).collect();
+        }
+    }
+    let shown = |i: usize| -> &str { display[i].as_deref().unwrap_or(&doc.sentences[i].text) };
     let t4 = Instant::now();
 
     let source_words: usize = doc.sentences.iter().map(|s| s.words).sum();
@@ -321,7 +408,8 @@ fn run() -> Result<()> {
                         // Four decimals: enough to rank by, and stable against float noise.
                         score: (p.score * 1e4).round() / 1e4,
                         text: shown(p.index),
-                        original: shortened[p.index].as_ref().map(|_| s.text.as_str()),
+                        original: display[p.index].as_ref().map(|_| s.text.as_str()),
+                        substitutions: swaps_made[p.index].clone(),
                     }
                 })
                 .collect(),
@@ -343,6 +431,10 @@ fn run() -> Result<()> {
             summary_words,
             100.0 * summary_words as f32 / source_words.max(1) as f32
         );
+        if args.simplify {
+            let made: usize = swaps_made.iter().map(Vec::len).sum();
+            eprintln!("simplify: {made} substitutions made ({} in the table)", lexical::table_size());
+        }
         let st = embedder.settings();
         eprintln!(
             "embedding model in {} ({:?} pooling, {} tokens{}), {head_note}",

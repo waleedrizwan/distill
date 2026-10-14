@@ -142,10 +142,25 @@ of the input's words, a property test enforces that.
   relaxes the whole-sentence guarantee. Not done: the trained token-deletion
   classifier on the Google sentence-compression data.
 
-- [ ] **Lexical substitution from a fixed table** (for example SimplePPDB ranked
-  by word frequency). A swap is accepted only if the sentence embedding stays
-  within a cosine threshold of the original. The table is a plain file anyone
-  can read and edit.
+- [x] **Lexical substitution from a fixed table (`--simplify`, `src/lexical.rs`).**
+  `src/lexicon.tsv` holds 223 single-word substitutions from SimplePPDB
+  (CC BY 3.0 US; attribution in the README), built by `eval/build_lexicon.py`:
+  paraphrase score >= 3.5, simplification score >= 0.75, the replacement at
+  least twice as frequent in the training documents, and the pair listed in
+  `eval/lexicon-approved.txt`. Every candidate pair is either approved or
+  recorded as rejected, with a reason, in `eval/lexicon-exclude.txt`.
+  Inflection is handled in code (plurals, -s/-ed/-ing, a few irregular
+  replacements, "a"/"an"). A swap is kept only if the sentence embedding stays
+  at cosine >= 0.95. Proper nouns, compounds, quotations and legal operative
+  text are left alone.
+  Findings: SimplePPDB's single-word rules are mostly wrong in context; of the
+  200 most frequent candidates after loosening the filters, one was usable.
+  On the development summaries, every swap with similarity below 0.94 was
+  wrong and those above 0.957 kept the meaning, though a few lost nuance or a
+  technical sense ("fundamental mode" in physics became "basic mode"). Effect: no ROUGE change; about 2% of news summary sentences and 10% of
+  paper sentences change, bills almost never; each swap uses a word about
+  seven times more common. Coverage grows only by reviewing more of the
+  unreviewed candidates the build reports.
 - [ ] **Sentence splitting on coordination** ("X, and Y" into two sentences when
   both halves have a subject and verb). Needs a part-of-speech tagger, so it
   comes last and only if the first two layers prove the demand.
