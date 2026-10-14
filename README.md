@@ -118,7 +118,8 @@ python3 eval/score.py        # about 30 s on an M-series Mac
 ```
 
 The sample is the first 100 CNN/DailyMail test articles, the first 60 BillSum
-test bills and the first 10 arXiv test papers. The text is not committed, but
+test bills, the first 10 arXiv test papers and the first 30 GovReport test
+reports. The text is not committed, but
 each document's SHA-256 is, so a different download fails instead of quietly
 changing the scores. ROUGE is computed by `eval/score.py` with no stemming, so
 the numbers are only comparable within this table.
@@ -148,6 +149,12 @@ the context sentences distill adds for readability count against the budget.
 |  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 |
 |  |  | centroid | 36.0 | 10.9 | 21.5 | 140 |
 |  |  | distill | **39.1** | **13.5** | **21.8** | **139** |
+| govreport (n=30) | 20 sentences | lead | 44.6 | 13.2 | 17.9 | 530 |
+|  |  | centroid | 54.0 | 22.5 | 21.6 | 725 |
+|  |  | distill | **52.6** | **18.6** | **20.5** | **626** |
+|  | ref length (599 w) | lead | 46.3 | 13.7 | 18.0 | 598 |
+|  |  | centroid | 56.4 | 22.5 | 21.8 | 596 |
+|  |  | distill | **54.0** | **19.0** | **20.8** | **597** |
 
 What this shows:
 
@@ -160,14 +167,22 @@ What this shows:
 - **Papers:** distill is ahead too, although no papers were used for training.
   Ten documents is still too few to read much into, and the arXiv set is
   lowercased and pre-tokenised, which is not what the splitter was built for.
+- **Long government reports: distill loses.** On GovReport (reports of about
+  8,600 words, summaries of about 600) plain centroid ranking beats distill by
+  3.5 ROUGE-2 at equal length, and by 5.3 on the 100 development reports. The
+  summaries draw on the whole report, so the rule that favours sentences later
+  text repeats works against it, and the salience score, trained only on news
+  and bills, costs a little more. The reports also arrive as one block of text
+  with no headings or paragraphs, so section budgets have nothing to work with.
 - **The learned salience score** is where most of the gain comes from. Against
   the same pipeline without it, ROUGE-2 at equal length rose by 1.9 points on
   the bills and 2.2 on the papers (both significant) and 0.4 on news (not
   significant).
 
 Knobs are tuned on separate development sets (500 CNN/DailyMail validation
-articles and 300 BillSum training bills), never on the test sets above. Run
-`python3 eval/score.py --sets cnndm-dev,billsum-dev --budget words --compare
+articles, 300 BillSum training bills and 100 GovReport validation reports),
+never on the test sets above. Run `python3 eval/score.py --sets
+cnndm-dev,billsum-dev,govreport-dev --budget words --compare
 eval/dev-baseline.json` after a change. It prints the difference in every cell
 and a paired bootstrap 95% interval for distill's ROUGE-2, so a change only
 counts when the interval excludes zero. `eval/baseline.json` holds the test

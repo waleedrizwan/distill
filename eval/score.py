@@ -15,8 +15,9 @@ Methods
   distill   distill's defaults, plus any --extra flags
 
 Budgets
-  sentences  a fixed number of sentences per set (cnndm 3, billsum 5, arxiv 6),
-             as in the README's original table. Longer picks score higher here.
+  sentences  a fixed number of sentences per set (cnndm 3, billsum 5, arxiv 6,
+             govreport 20), as in the README's original table. Longer picks
+             score higher here.
   words      each document's budget is its reference summary's word count, so
              every method is compared at about the same length. Lead takes
              sentences in document order, skipping any that would overflow,
@@ -42,8 +43,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-SENTENCES = {"cnndm": 3, "billsum": 5, "arxiv": 6}
-DEV_SETS = "cnndm-dev,billsum-dev"
+SENTENCES = {"cnndm": 3, "billsum": 5, "arxiv": 6, "govreport": 20}
+DEV_SETS = "cnndm-dev,billsum-dev,govreport-dev"
 METHODS = ["lead", "centroid", "distill"]
 CENTROID_FLAGS = [
     "--centrality", "centroid", "--lambda", "1", "--lead", "0", "--penalty", "0",
@@ -178,7 +179,7 @@ def bootstrap(diffs, n=2000, seed=0):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bin", default=str(ROOT / "target" / "release" / "distill"))
-    ap.add_argument("--sets", default="cnndm,billsum,arxiv", help=f"comma-separated; tune on {DEV_SETS}")
+    ap.add_argument("--sets", default="cnndm,billsum,arxiv,govreport", help=f"comma-separated; tune on {DEV_SETS}")
     ap.add_argument("--budget", choices=["sentences", "words", "both"], default="both")
     ap.add_argument("--limit", type=int, default=0, help="score only the first N documents per set")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
