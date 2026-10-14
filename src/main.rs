@@ -1,0 +1,391 @@
+mod embed;
+mod segment;
+mod select;
+
+use anyhow::{bail, Context, Result};
+use clap::Parser;
+use serde::Serialize;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+/// Deterministic extractive summarizer.
+///
+/// Picks the most representative sentences from a document and prints them
+/// verbatim, in their original order. No text is generated, so nothing can be
+/// invented, and the same input always gives the same output.
+#[derive(Parser, Debug)]
+#[command(name = "distill", version)]
+struct Args {
+    /// Text or Markdown file to summarize ("-" or omitted reads stdin)
+    file: Option<PathBuf>,
+
+    /// Number of sentences to select
+    #[arg(short = 'n', long, conflicts_with = "ratio")]
+    sentences: Option<usize>,
+
+    /// Fraction of the document's sentences to select (e.g. 0.1)
+    #[arg(short, long)]
+    ratio: Option<f32>,
+
+    /// Folder with config.json, tokenizer.json and model.safetensors
+    /// [default: $DISTILL_MODEL, ./model, <binary folder>/model, ~/.distill/model]
+    #[arg(short, long)]
+    model_dir: Option<PathBuf>,
+
+    /// Relevance vs. diversity (1.0 = most central sentences, lower = less repetition)
+    #[arg(long, default_value_t = 0.7)]
+    lambda: f32,
+
+    /// Bonus for sentences that open a section (0 disables)
+    #[arg(long, default_value_t = 0.1)]
+    lead: f32,
+
+    /// How sentence importance is measured
+    #[arg(long, value_enum, default_value_t = select::Centrality::Directed)]
+    centrality: select::Centrality,
+
+    /// Directed centrality: weight of similarity to earlier text (later text = 1)
+    #[arg(long, default_value_t = 0.3, allow_negative_numbers = true)]
+    backward: f32,
+
+    /// Directed centrality: ignore similarities below this point of the min..max range
+    #[arg(long, default_value_t = 0.3)]
+    beta: f32,
+
+    /// Weight of within-section importance vs whole-document importance
+    #[arg(long, default_value_t = 0.4)]
+    section_weight: f32,
+
+    /// Penalty for sentences that lean on other text ("However...", "see Figure 2")
+    #[arg(long, default_value_t = 0.08)]
+    penalty: f32,
+
+    /// Extra budget share for the opening section and abstract/summary/conclusion
+    #[arg(long, default_value_t = 1.5)]
+    boost: f32,
+
+    /// Don't pull in the preceding sentence for "This...", "However..." openers
+    #[arg(long)]
+    no_repair: bool,
+
+    /// Don't print section headings
+    #[arg(long)]
+    no_headings: bool,
+
+    /// Output JSON with sentence positions and scores
+    #[arg(long)]
+    json: bool,
+
+    /// Rejoin words hyphenated across line breaks (useful for PDF text)
+    #[arg(long)]
+    dehyphenate: bool,
+
+    /// Shortest sentence (in words) that can be selected
+    #[arg(long, default_value_t = 6)]
+    min_words: usize,
+
+    /// Print the detected sections and sentences instead of a summary
+    #[arg(long)]
+    show_segments: bool,
+
+    /// Print counts and timings to stderr
+    #[arg(short, long)]
+    verbose: bool,
+
+    #[arg(long, default_value_t = 8, hide = true)]
+    batch_size: usize,
+}
+
+#[derive(Serialize)]
+struct JsonSentence<'a> {
+    /// Position of the sentence in the source document (0-based).
+    index: usize,
+    /// Top-level section heading.
+    section: Option<&'a str>,
+    /// Nearest heading above the sentence.
+    subsection: Option<&'a str>,
+    kind: &'static str,
+    rank: usize,
+    score: f32,
+    text: &'a str,
+}
+
+#[derive(Serialize)]
+struct JsonOut<'a> {
+    source_sentences: usize,
+    candidate_sentences: usize,
+    sections: usize,
+    summary_words: usize,
+    source_words: usize,
+    sentences: Vec<JsonSentence<'a>>,
+}
+
+fn main() -> std::process::ExitCode {
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<()> {
+    let args = Args::parse();
+    let t0 = Instant::now();
+
+    let raw = match args.file.as_deref() {
+        Some(p) if p != Path::new("-") => {
+            let bytes = std::fs::read(p).with_context(|| format!("reading {}", p.display()))?;
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+        _ => {
+            let mut s = String::new();
+            std::io::stdin().read_to_string(&mut s).context("reading stdin")?;
+            s
+        }
+    };
+
+    let doc = segment::parse(
+        &raw,
+        &segment::ParseOptions { min_words: args.min_words, dehyphenate: args.dehyphenate },
+    );
+
+    if args.show_segments {
+        for (si, sec) in doc.sections.iter().enumerate() {
+            if sec.sentences.is_empty() && sec.title.is_none() {
+                continue;
+            }
+            println!(
+                "== section {si}: {}{}",
+                sec.title.as_deref().unwrap_or("(untitled)"),
+                if sec.skip { "  [skipped]" } else { "" }
+            );
+            for s in &doc.sentences[sec.sentences.clone()] {
+                let flag = match (s.candidate, s.list_item) {
+                    (true, true) => "c-",
+                    (true, false) => "c ",
+                    (false, true) => " -",
+                    (false, false) => "  ",
+                };
+                println!("{:>5} p{:<4} {flag} {}", s.index, s.paragraph, s.text);
+            }
+        }
+        return Ok(());
+    }
+
+    let candidates: Vec<&segment::Sentence> = doc.sentences.iter().filter(|s| s.candidate).collect();
+    if candidates.is_empty() {
+        bail!("no usable sentences found in the input");
+    }
+
+    let budget = match (args.sentences, args.ratio) {
+        (Some(n), _) => n,
+        (None, Some(r)) => {
+            if !(r > 0.0 && r <= 1.0) {
+                bail!("--ratio must be between 0 and 1");
+            }
+            ((candidates.len() as f32 * r).round() as usize).max(1)
+        }
+        (None, None) => ((candidates.len() as f32 * 0.1).ceil() as usize).clamp(3, 15),
+    };
+
+    let model_dir = find_model(args.model_dir.as_deref())?;
+    let t1 = Instant::now();
+    let embedder = embed::Embedder::load(&model_dir)?;
+    let t2 = Instant::now();
+    let texts: Vec<&str> = candidates.iter().map(|s| s.text.as_str()).collect();
+    let vectors = embed_cached(&embedder, &texts, args.batch_size)?;
+    let t3 = Instant::now();
+
+    let params = select::Params {
+        budget,
+        lambda: args.lambda.clamp(0.0, 1.0),
+        lead: args.lead,
+        centrality: args.centrality,
+        backward: args.backward,
+        beta: args.beta.clamp(0.0, 1.0),
+        section_weight: args.section_weight.clamp(0.0, 1.0),
+        dependence_penalty: args.penalty,
+        summary_section_boost: args.boost.max(0.0),
+        repair: !args.no_repair,
+    };
+    let selection = select::select(&doc, &vectors, &params);
+    let picks = &selection.picks;
+    let t4 = Instant::now();
+
+    let source_words: usize = doc.sentences.iter().map(|s| s.words).sum();
+    let summary_words: usize = picks.iter().map(|p| doc.sentences[p.index].words).sum();
+
+    if args.json {
+        let out = JsonOut {
+            source_sentences: doc.sentences.len(),
+            candidate_sentences: candidates.len(),
+            sections: doc.sections.iter().filter(|s| !s.sentences.is_empty()).count(),
+            summary_words,
+            source_words,
+            sentences: picks
+                .iter()
+                .map(|p| {
+                    let s = &doc.sentences[p.index];
+                    JsonSentence {
+                        index: p.index,
+                        section: selection.groups[p.group].as_deref(),
+                        subsection: doc.sections[s.section].title.as_deref(),
+                        kind: match p.kind {
+                            select::Kind::Selected => "selected",
+                            select::Kind::Context => "context",
+                        },
+                        rank: p.rank,
+                        // Four decimals: enough to rank by, and stable against float noise.
+                        score: (p.score * 1e4).round() / 1e4,
+                        text: &s.text,
+                    }
+                })
+                .collect(),
+        };
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else {
+        print_text(&doc, &selection, !args.no_headings);
+    }
+
+    if args.verbose {
+        eprintln!(
+            "{} sentences ({} candidates) in {} sections -> {} selected + {} context; {} -> {} words ({:.0}%)",
+            doc.sentences.len(),
+            candidates.len(),
+            doc.sections.iter().filter(|s| !s.sentences.is_empty()).count(),
+            picks.iter().filter(|p| p.kind == select::Kind::Selected).count(),
+            picks.iter().filter(|p| p.kind == select::Kind::Context).count(),
+            source_words,
+            summary_words,
+            100.0 * summary_words as f32 / source_words.max(1) as f32
+        );
+        eprintln!(
+            "parse {:.0?}, model load {:.0?}, embed {:.0?}, select {:.0?}, total {:.0?}",
+            t1 - t0,
+            t2 - t1,
+            t3 - t2,
+            t4 - t3,
+            t4 - t0
+        );
+    }
+    Ok(())
+}
+
+/// Sentences are printed in document order. Sentences that were adjacent in
+/// the source stay on one line; a new line means text was skipped in between.
+fn print_text(doc: &segment::Document, sel: &select::Selection, headings: bool) {
+    let titled: std::collections::BTreeSet<usize> = sel
+        .picks
+        .iter()
+        .filter(|p| sel.groups[p.group].is_some())
+        .map(|p| p.group)
+        .collect();
+    let show_headings = headings && titled.len() >= 2;
+
+    let mut last_group: Option<usize> = None;
+    let mut last_index: Option<usize> = None;
+    let mut line = String::new();
+    let mut first_output = true;
+    for p in &sel.picks {
+        let s = &doc.sentences[p.index];
+        let new_group = last_group != Some(p.group);
+        let adjacent = last_index.map(|i| i + 1 == p.index).unwrap_or(false) && !new_group && !s.list_item;
+        if !adjacent && !line.is_empty() {
+            println!("{line}");
+            line.clear();
+        }
+        if new_group {
+            if show_headings {
+                if !first_output {
+                    println!();
+                }
+                if let Some(t) = &sel.groups[p.group] {
+                    println!("[{t}]");
+                }
+            }
+            last_group = Some(p.group);
+        }
+        first_output = false;
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(&s.text);
+        last_index = Some(p.index);
+    }
+    if !line.is_empty() {
+        println!("{line}");
+    }
+}
+
+/// Embeddings are a pure function of the sentence text, so they can be reused.
+/// Set DISTILL_CACHE to a folder to skip re-embedding an unchanged document.
+fn embed_cached(embedder: &embed::Embedder, texts: &[&str], batch_size: usize) -> Result<Vec<Vec<f32>>> {
+    let Some(dir) = std::env::var_os("DISTILL_CACHE").map(PathBuf::from) else {
+        return embedder.embed(texts, batch_size);
+    };
+    // FNV-1a over all sentence texts.
+    let mut h: u64 = 0xcbf29ce484222325;
+    for t in texts {
+        for b in t.bytes().chain(std::iter::once(0u8)) {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    }
+    let path = dir.join(format!("{h:016x}-{}.f32", texts.len()));
+    if let Ok(bytes) = std::fs::read(&path) {
+        let n = texts.len();
+        if n > 0 && bytes.len() % (4 * n) == 0 {
+            let dim = bytes.len() / (4 * n);
+            let flat: Vec<f32> = bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+            return Ok(flat.chunks(dim).map(|c| c.to_vec()).collect());
+        }
+    }
+    let vectors = embedder.embed(texts, batch_size)?;
+    let mut bytes = Vec::with_capacity(vectors.len() * vectors.first().map(|v| v.len()).unwrap_or(0) * 4);
+    for v in &vectors {
+        for x in v {
+            bytes.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&path, bytes);
+    Ok(vectors)
+}
+
+fn find_model(explicit: Option<&Path>) -> Result<PathBuf> {
+    let mut tried: Vec<PathBuf> = Vec::new();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(p) = explicit {
+        candidates.push(p.to_path_buf());
+    } else {
+        if let Ok(p) = std::env::var("DISTILL_MODEL") {
+            candidates.push(PathBuf::from(p));
+        }
+        candidates.push(PathBuf::from("model"));
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("model"));
+                // target/release/distill -> project root
+                if let Some(root) = dir.parent().and_then(|d| d.parent()) {
+                    candidates.push(root.join("model"));
+                }
+            }
+        }
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            candidates.push(PathBuf::from(home).join(".distill").join("model"));
+        }
+    }
+    for c in candidates {
+        if c.join("model.safetensors").is_file() && c.join("tokenizer.json").is_file() && c.join("config.json").is_file() {
+            return Ok(c);
+        }
+        tried.push(c);
+    }
+    bail!(
+        "embedding model not found. Run ./fetch-model.sh, or pass --model-dir.\nLooked in:\n{}",
+        tried.iter().map(|p| format!("  {}", p.display())).collect::<Vec<_>>().join("\n")
+    )
+}
