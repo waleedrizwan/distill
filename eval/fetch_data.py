@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download the frozen evaluation sample into eval/data/ and verify it.
 
-The sample is a fixed slice of three public test sets, plus larger development
+The sample is a fixed slice of four public test sets, plus larger development
 sets for tuning. The text itself is not committed (the news articles are
 copyrighted); instead every document's SHA-256 is in eval/manifest.tsv, so a
 run that scores different text fails loudly.
@@ -32,10 +32,12 @@ SETS = {
     "cnndm": ("abisee/cnn_dailymail", "3.0.0", "test", 0, 100, "article", "highlights", "id"),
     "billsum": ("FiscalNote/billsum", "default", "test", 0, 60, "text", "summary", None),
     "arxiv": ("ccdv/arxiv-summarization", "section", "test", 0, 10, "article", "abstract", None),
+    "govreport": ("ccdv/govreport-summarization", "document", "test", 0, 30, "report", "summary", None),
     # Development sets: tune knobs on these, report on the test sets above.
     # BillSum has no validation split, so its dev set comes from train.
     "cnndm-dev": ("abisee/cnn_dailymail", "3.0.0", "validation", 0, 500, "article", "highlights", "id"),
     "billsum-dev": ("FiscalNote/billsum", "default", "train", 0, 300, "text", "summary", None),
+    "govreport-dev": ("ccdv/govreport-summarization", "document", "validation", 0, 100, "report", "summary", None),
     # Training sets for the salience head (eval/train_salience.py). BillSum's
     # starts after the 300 bills used for development.
     "cnndm-train": ("abisee/cnn_dailymail", "3.0.0", "train", 0, 3000, "article", "highlights", "id"),
