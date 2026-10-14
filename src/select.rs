@@ -1012,7 +1012,7 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(300))]
+            #![proptest_config(ProptestConfig::with_cases(1000))]
 
             #[test]
             fn invariants(text in document(), p in params()) {

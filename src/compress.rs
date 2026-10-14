@@ -170,9 +170,9 @@ pub fn inside_quote(s: &str, pos: usize) -> bool {
 }
 
 /// Like `Regex::replace_all`, but leaves matches that start or end inside a
-/// quotation untouched, so quoted words are never altered, and skips a
-/// deletion that would fuse the words on either side ("mill (built 1850)was")
-/// into one the input never had.
+/// quotation, or contain one, untouched, so quoted words are never altered;
+/// and skips a deletion that would fuse the words on either side
+/// ("mill (built 1850)was") into one the input never had.
 fn replace_outside_quotes(s: &str, re: &Regex, mut with: impl FnMut(&regex::Captures) -> String) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last = 0;
@@ -181,7 +181,12 @@ fn replace_outside_quotes(s: &str, re: &Regex, mut with: impl FnMut(&regex::Capt
         out.push_str(&s[last..m.start()]);
         let fuses = s[..m.start()].chars().next_back().is_some_and(char::is_alphanumeric)
             && s[m.end()..].chars().next().is_some_and(char::is_alphanumeric);
-        let r = if inside_quote(s, m.start()) || inside_quote(s, m.end()) { None } else { Some(with(&c)) };
+        let touches_quote = inside_quote(s, m.start())
+            || inside_quote(s, m.end())
+            || m.as_str().contains(['"', '\u{201C}', '\u{201D}'])
+            || m.as_str().contains("``")
+            || m.as_str().contains("''");
+        let r = if touches_quote { None } else { Some(with(&c)) };
         match r {
             Some(r) if !(r.is_empty() && fuses) => out.push_str(&r),
             _ => out.push_str(m.as_str()),
@@ -364,6 +369,9 @@ mod tests {
         // A citation inside a quotation is part of the quotation.
         assert_eq!(compress("He said \"see [3] for the details\" and then left the room."), None);
         assert_eq!(c("He said see [3] for the details and then left the room."), "He said see for the details and then left the room.");
+        // An aside that contains a quotation would take the quotation with it.
+        assert_eq!(compress("The minister -- \"we will act,\" she said -- left the chamber before the vote."), None);
+        assert_eq!(c("The minister -- visibly tired, aides said -- left the chamber before the vote."), "The minister left the chamber before the vote.");
     }
 
     #[test]
@@ -447,7 +455,7 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(500))]
+            #![proptest_config(ProptestConfig::with_cases(2000))]
 
             #[test]
             fn deletion_only(s in sentence()) {

@@ -383,7 +383,7 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(500))]
+            #![proptest_config(ProptestConfig::with_cases(2000))]
 
             #[test]
             fn swaps_are_sound(s in sentence(), mask in prop::collection::vec(any::<bool>(), 1..8)) {

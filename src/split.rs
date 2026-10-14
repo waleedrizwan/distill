@@ -245,7 +245,7 @@ mod tests {
         use proptest::prelude::*;
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(500))]
+            #![proptest_config(ProptestConfig::with_cases(2000))]
 
             #[test]
             fn nothing_added(s in sentence()) {
