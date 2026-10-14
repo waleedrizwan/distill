@@ -1,0 +1,421 @@
+# Pairs removed from src/lexicon.tsv after reading every entry by hand.
+# Format: word replacement   # reason     ("word *" drops the word entirely)
+# Reasons: meaning (changes or reverses meaning), pos (wrong part of speech
+# or the output is a different word class), lossy (drops essential meaning,
+# usually cutting a compound to its head), notsimpler, grammar (the swap
+# breaks the surrounding syntax), register.
+
+affirmative positive        # meaning: "affirmative action"
+cellular cell               # pos
+christianity christian      # pos
+climatic climate            # pos
+globalized global           # meaning
+homosexual gay              # register
+infamous famous             # meaning: reversed
+infeasible feasible         # meaning: reversed
+infrastructural infrastructure  # pos
+invaluable valuable         # meaning: weakened
+pharmaceutical pharmacy     # meaning
+policing police             # pos
+proactive active            # meaning
+psychological mental        # meaning: "psychological warfare"
+statistical statistics      # pos
+uniqueness unique           # pos
+unwilling willing           # meaning: reversed
+acceptability acceptance    # meaning
+accommodation shelter       # meaning
+addressee address           # meaning
+alcoholism alcohol          # meaning
+amerindian indian           # meaning
+apprehension concern        # meaning: also "arrest"
+balloting ballot            # pos
+battleship ship             # lossy
+blacklist list              # lossy
+bloodstream blood           # lossy
+borderland border           # lossy
+broadcasting radio          # meaning
+businesspeople business     # meaning
+chairmanship chairman       # meaning
+characteristic particular   # meaning
+claimant claim              # meaning
+cleansing cleaning          # meaning: "ethnic cleansing"
+coinage coin                # meaning
+commemoration anniversary   # meaning
+constitutionally constitution  # pos
+cropping crop               # meaning
+democratically democracy    # pos
+directorate director        # meaning
+discontinuation cessation   # notsimpler
+drugstore store             # lossy
+filmmaking film             # meaning
+fishery fishing             # meaning
+formulation formula         # meaning
+gangbangers gang            # meaning
+governorship governor       # meaning
+grading grade               # meaning
+grassland grass             # lossy
+healthcare health           # meaning
+homepage page               # lossy
+hospitalization hospital    # pos
+imagery image               # meaning
+imprisonment prison         # pos
+incarceration detention     # notsimpler
+inpatient patient           # lossy
+inspectorate inspector      # meaning
+inventorying inventory      # pos
+irradiation radiation       # meaning
+kilometer km                # register
+lakeshore lake              # lossy
+landfilling landfill        # pos
+landholding land            # lossy
+metallic metal              # pos
+mindset mind                # meaning
+minibus bus                 # lossy
+moderne modern              # meaning
+motorboat boat              # lossy
+mountainous mountain        # pos
+oceanic ocean               # pos
+parliamentarian parliament  # meaning
+petitioner petition         # meaning
+petrochemical chemical      # lossy
+pirated pirate              # pos
+pollutant pollution         # meaning
+precipitation rain          # meaning
+premium price               # meaning
+prepayment payment          # lossy
+problematic problem         # pos
+professorship professor     # meaning
+radiocommunication communications  # pos
+rainstorm rain              # lossy
+refunding refund            # pos
+representativeness representation  # meaning
+revitalization recovery     # meaning
+roadmap map                 # meaning
+roadway highway             # meaning
+salmonid salmon             # meaning
+schoolgirl girl             # lossy
+screenwriter writer         # lossy
+scriptwriter writer         # lossy
+sidewall wall               # lossy
+snowstorm snow              # lossy
+specificity specific        # pos
+speedboat boat              # lossy
+statistician statistics     # meaning
+steamship ship              # lossy
+storefront store            # lossy
+subcommittee committee      # lossy
+subgroup group              # lossy
+subsystem system            # lossy
+telecommunication communication  # meaning
+tenderers tender            # meaning
+tolling toll                # pos
+transiting transit          # pos
+trillion billion            # meaning
+undergraduate university    # meaning
+undersecretary secretary    # meaning
+unionized union             # pos
+volunteerism volunteer      # pos
+watercourse waters          # meaning
+waterway water              # lossy
+wildfire fire               # lossy
+youngster young             # pos
+legitimately legally        # meaning
+substantively substantially # meaning
+sufficiently enough         # grammar: "sufficiently large"
+accede accept               # meaning: "accede to the throne"
+accelerate further          # meaning
+accessible open             # meaning
+accommodate meet            # meaning
+acknowledge accept          # meaning
+adhere follow               # grammar: "adhere to"
+adjustable adjust           # pos
+advancement progress        # pos
+alleviate solve             # meaning
+appreciate thank            # meaning
+ascertain know              # meaning
+attire dress                # pos
+avoidable avoid             # pos
+belief believe              # pos
+capitalize realize          # meaning
+caregiving care             # pos
+commend thank               # meaning
+commercialize develop       # meaning
+comprehensible understand   # pos
+confident believe           # pos
+congratulate thank          # meaning
+consequence result          # pos (kept as a noun)
+contravene comply           # meaning: reversed
+correspondence letter       # pos
+cosponsor sponsor           # meaning
+countenance accept          # meaning
+delineate define            # meaning
+deterioration decline       # pos
+discourage stop             # meaning
+disembark arrive            # meaning
+disseminate publish         # meaning
+endanger harm               # meaning
+eradicate overcome          # meaning
+foreshadow suggest          # meaning
+formulate prepare           # meaning
+gratitude thank             # pos
+hazard risk                 # pos
+hypothesis suggest          # pos
+illuminate reveal           # meaning
+infiltrate enter            # meaning
+intensify further           # meaning
+interfere affect            # meaning
+jeopardize affect           # meaning
+mistreatment abuse          # pos
+misunderstand understand    # meaning: reversed
+originate origin            # pos
+outgrow grow                # meaning
+outperform better           # pos
+patentable patent           # pos
+perceive understand         # meaning
+photograph picture          # pos
+phrase word                 # meaning
+popularize promote          # meaning
+preparedness prepare        # pos
+reappear appear             # meaning
+reassert strengthen         # meaning
+reconstitute recover        # meaning
+reexamine examine           # meaning
+relinquish resign           # meaning
+repay pay                   # meaning
+repayable repay             # pos
+resell sell                 # meaning
+resize size                 # pos
+sensitize inform            # meaning
+subcontract contract        # meaning
+substantiate confirm        # meaning
+suggest say                 # notsimpler
+suspend stop                # meaning
+sympathize understand       # meaning
+threaten harm               # meaning
+troubleshoot solve          # meaning
+unavoidable avoid           # pos
+uplift lift                 # meaning
+withstand survive           # meaning
+wonder know                 # meaning
+
+# Second-pass review: after the pairs above were removed, these words had no
+# good replacement left.
+fishery *                   # meaning
+grassland *                 # lossy
+parliamentarian *           # meaning: also a procedural officer
+prepayment *                # meaning
+radiocommunication *        # pos
+acknowledge *               # meaning
+illuminate *                # meaning
+jeopardize *                # meaning
+reconstitute *              # meaning
+suggest *                   # notsimpler
+readjustment *              # pos (listed as an adjective)
+
+# Third pass: the 200 most frequent unreviewed candidates after the filters
+# were loosened. All rejected except "manufacture produce" (approved).
+# Mostly meaning changes; reason not recorded per pair.
+recommendation call
+recommendation decision
+recommendation matter
+recommendation report
+recommendation request
+collaboration cooperation
+collaboration joint
+essential important
+essential key
+regime government
+decade years
+indictment sentence
+watershed waters
+exist happen
+leasing lease
+associate accept
+authorize accept
+authorize require
+struggle best
+advocate accept
+advocate consider
+advocate promote
+advocate support
+prosecutor court
+controversy matter
+exactly really
+judiciary justice
+decrease lower
+graduate student
+eliminate limit
+eliminate lower
+eliminate reduce
+statute laws
+explain know
+explain say
+explain tell
+explain why
+explosion bomb
+protective protect
+doubt believe
+salary pay
+alliance agreement
+ammunition gun
+interpretation meaning
+interpretation understanding
+contribute bring
+possibly probably
+addressing address
+memorandum agreement
+memorandum document
+memorandum statement
+explanation why
+recording record
+accessible access
+capability means
+adopt accept
+convey describe
+convey send
+destination location
+destination site
+recall tell
+transitional transition
+classification division
+dissemination disclosure
+dissemination provide
+dissemination publish
+dissemination release
+lifetime life
+achievement performance
+achievement progress
+beautiful pretty
+imprisonment sentence
+listen hear
+write tell
+preliminary final
+preliminary prior
+achieving achieve
+conversation talks
+withdraw leave
+assure sure
+closing close
+tariff tax
+realize believe
+realize know
+confirm tell
+easily easy
+healthcare care
+widespread wide
+capture secure
+indicate mean
+indicate say
+diverse different
+manufacture develop
+manufacture obtain
+manufacture supply
+firing fire
+automobile motor
+automobile vehicle
+objective purpose
+correspondent editor
+fundamental key
+targeting target
+tournament round
+celebrate mark
+purchaser purchase
+mistake wrong
+strengthen bring
+strengthen build
+strengthen develop
+strengthen secure
+shift change
+survive die
+depository deposit
+gunfire fire
+dwelling building
+encouraging encourage
+infection illness
+minimize avoid
+planet world
+assassination bombing
+assassination killing
+assassination murder
+assassination shooting
+imposition impose
+reservoir dam
+saving save
+preventive prevention
+reimburse pay
+distribute sell
+handgun gun
+importation export
+advise advice
+advise say
+mandate purpose
+mandate term
+advancement promote
+battlefield battle
+gathering meeting
+grantee grant
+measurement track
+lifestyle life
+lifestyle living
+vocational professional
+crucial important
+entitlement compensation
+entitlement payment
+educate learn
+photograph copy
+disseminate implement
+disseminate notify
+disseminate obtain
+overcome break
+furnish supply
+beating beat
+communicate tell
+contracting contract
+familial family
+reveal tell
+uniformed uniform
+boyfriend brother
+curriculum course
+curriculum program
+deserve give
+insufficient lack
+methodology approach
+methodology strategy
+methodology technology
+subsequently then
+economically economy
+periodically monitor
+periodically regularly
+preserving preserve
+relate tell
+staffing staff
+initiate submit
+signing sign
+actively active
+competitiveness competitive
+introduction start
+landscape design
+landscape world
+adjust change
+bedroom room
+clarification comment
+clarification details
+delegation committee
+listing list
+magistrate judge
+magistrate judges
+proportion percent
+proportion percentage
+undertake continue
+undertake engage
+undertake manage
+assume accept
+assume believe
+assume say
+incorporate bring
+incorporate come
+
+# Removed after the similarity check exposed them in development output.
+globally worldwide          # pos: "globally significant" -> "worldwide significant"
+intensify increase          # meaning: "talks intensified" -> "talks increased"
+proposition proposal        # meaning: a theorem-like statement in mathematics

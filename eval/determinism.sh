@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 
 BIN=${DISTILL_BIN:-target/release/distill}
 GOLDEN=eval/golden.sha256
-MODES=("" "-n 3" "--words 150" "--centrality centroid" "--no-repair --lambda 0.5" "--compress --words 150")
+MODES=("" "-n 3" "--words 150" "--centrality centroid" "--no-repair --lambda 0.5" "--compress --words 150" "--simplify --compress --words 150")
 mode=${1:-check}
 
 [ -x "$BIN" ] || { echo "$BIN not found; run: cargo build --release" >&2; exit 1; }

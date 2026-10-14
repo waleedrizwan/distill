@@ -6,7 +6,8 @@ sentences from a document and prints them **verbatim**, in their original order.
 - **Cannot hallucinate.** No text is generated. Every output sentence is a
   sentence from the input (whitespace-normalised). With `--compress`, a
   sentence can have pieces left out, but every word it keeps is from the input,
-  in order.
+  in order. With `--simplify`, a word can be swapped for a simpler one, but
+  only from a fixed, hand-reviewed table (`src/lexicon.tsv`).
 - **Deterministic.** Same input and same binary give byte-identical output.
 - **Local.** One binary plus a 90 MB model file. No network at run time.
 
@@ -40,6 +41,8 @@ distill [FILE]            summarize FILE (or stdin)
       --show-segments     print how the text was split, without summarizing
       --compress          leave out asides: parentheticals, citations, "which"/"who"
                           clauses, dash interruptions, openers like "However,"
+      --simplify          swap hard words for simpler ones from a reviewed table
+                          ("numerous" -> "many"), only where meaning barely moves
       --no-repair         don't add context sentences
       --no-headings       don't print section headings
       --dehyphenate       rejoin words broken across lines (PDF text)
@@ -173,6 +176,25 @@ on the test bills, because the words it frees go to more content. It never
 touches list labels, acronym definitions, defined terms, qualifiers such as
 "(other than ...)", quoted text, or "which" clauses in legal operative text.
 
+`--simplify` (`src/lexical.rs`) swaps words using `src/lexicon.tsv`: 223
+single-word substitutions such as "numerous" to "many", "frequently" to
+"often" and "commence" to "start", taken from SimplePPDB and kept only after
+being read by hand (`eval/lexicon-approved.txt`; rejected pairs and why are in
+`eval/lexicon-exclude.txt`). It handles plurals, verb endings and "a"/"an",
+and leaves proper nouns, compounds, quotations and legal operative text
+alone. Each swap is kept only if the sentence's embedding stays at a cosine
+similarity of at least 0.95 to the original (`--simplify-threshold`); on the
+development summaries every swap below 0.94 was wrong and those above 0.957
+kept the meaning, though a few lost nuance or a technical sense ("manufacture
+a crisis" became "produce a crisis"; in physics, "fundamental mode" became
+"basic mode"). It does not change ROUGE. It is also rare: about 2% of news
+summary sentences and 10% of paper sentences change, bills almost never. Each
+swap replaces a word about seven times more common in news and bills. Most
+SimplePPDB single-word rules turned out to be wrong in context ("survive" to
+"die", "importation" to "export"), which is why the table is an allow-list;
+`python3 eval/build_lexicon.py` reports the candidates nobody has reviewed yet,
+most frequent first.
+
 The salience weights are trained by `python3 eval/train_salience.py` on 3,000
 CNN/DailyMail and 1,500 BillSum training documents, none of which overlap the
 development or test sets. It labels each document's sentences with a greedy
@@ -212,6 +234,17 @@ on Linux.
   "Read more:" and "Click here" links, share and follow prompts, newsletter
   sign-ups, link menus, copyright and licence footers, and sections such as
   "Related articles". Anything else left in the file can still be selected.
+
+## Third-party data
+
+`src/lexicon.tsv` is derived from SimplePPDB by Ellie Pavlick and Chris
+Callison-Burch ("Simple PPDB: A Paraphrase Database for Simplification", ACL
+2016), licensed under
+[Creative Commons Attribution 3.0 United States](https://creativecommons.org/licenses/by/3.0/us/).
+It has been modified: filtered by `eval/build_lexicon.py` and reviewed by hand.
+The original download link is dead; the build uses the Internet Archive's
+capture of `https://www.seas.upenn.edu/~nlp/resources/simple-ppdb.tgz`,
+whose checksum is recorded in the script.
 
 ## Tests
 

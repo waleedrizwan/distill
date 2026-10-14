@@ -39,7 +39,10 @@ re!(
     r"(?i)^(?:other than|except|excluding|including|not including|unless|but\b|not\b|without|only\b|if\b|provided|subject to|as (?:defined|amended|added|described))|referred to|hereinafter|hereafter|``|''"
 );
 // Legal operative text, where a comma-bounded "which" can restrict a definition.
-re!(re_legal, r"(?i)\b(?:shall|means|the term|is amended|are amended|is hereby)\b|^\(?[a-z0-9]{1,4}\)|^``");
+re!(
+    re_legal,
+    r"(?i)\b(?:shall|means|the term|is amended|are amended|is hereby|this (?:Act|section|subsection|paragraph|title|chapter)|U\.S\.C\.)\b|^\(?[a-z0-9]{1,4}\)|^``"
+);
 re!(re_paren, r"\s*\(([^()\[\]]{1,200})\)");
 // "(a)", "(12)", "(iii)", "(B)": list labels and references to them.
 re!(re_label, r"^(?:[A-Za-z]{1,2}|\d{1,3}|(?i:[ivxlcdm]{1,7}))$");
@@ -121,9 +124,14 @@ fn clause_ok(clause: &str) -> bool {
     clause.split_whitespace().count() <= 16 && !re_speech().is_match(clause)
 }
 
+/// Does this read as legal operative text ("shall", "means", "is amended")?
+pub fn is_legal(text: &str) -> bool {
+    re_legal().is_match(text)
+}
+
 /// Is byte offset `pos` inside a quotation? Counts straight double quotes,
 /// curly quotes and the ``...'' style used in US bills.
-fn inside_quote(s: &str, pos: usize) -> bool {
+pub fn inside_quote(s: &str, pos: usize) -> bool {
     let before = &s[..pos];
     let straight = before.matches('"').count() % 2 == 1;
     let curly = before.matches('\u{201C}').count() > before.matches('\u{201D}').count();

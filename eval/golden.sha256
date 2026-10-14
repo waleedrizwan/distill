@@ -4,15 +4,18 @@ fbe60c1b88cff474c2c819cf11636d3c19902cdbec1348a6847d7fddb7f74107  samples/apache
 37f29539de5797055b745abf1e9c991cff1a03cec1c01356ed71be8151c0b413  samples/apache-license.txt --centrality centroid
 36c275e4d6dcb87da7925804a149d74370e3587ccf40e4d6e8145efdbb056ea4  samples/apache-license.txt --no-repair --lambda 0.5
 fbe60c1b88cff474c2c819cf11636d3c19902cdbec1348a6847d7fddb7f74107  samples/apache-license.txt --compress --words 150
+fbe60c1b88cff474c2c819cf11636d3c19902cdbec1348a6847d7fddb7f74107  samples/apache-license.txt --simplify --compress --words 150
 3c66cb2e25887d91634ca095a1eb987c16af8f1dacc46108ba2a7041121b5ffe  samples/us-bill.txt (defaults)
 3bbe9a835aa70efcdb900f23664d2ab94f6b77bcf365679d58d428bd6dc2f735  samples/us-bill.txt -n 3
 11c2ae74b2a71ffc09ea443b97b48b5f7b12e89db6d13ff1121a3b05e00bd6ac  samples/us-bill.txt --words 150
 1454a7bc5f3b09c903422b40ab61f5bd920c50e69637739e5e82392b0bf5beeb  samples/us-bill.txt --centrality centroid
 bded54d7890795b0fa450ccbf7b4c82b5317d5094a08bb1d32b84dd248f66a8a  samples/us-bill.txt --no-repair --lambda 0.5
 11c2ae74b2a71ffc09ea443b97b48b5f7b12e89db6d13ff1121a3b05e00bd6ac  samples/us-bill.txt --compress --words 150
+11c2ae74b2a71ffc09ea443b97b48b5f7b12e89db6d13ff1121a3b05e00bd6ac  samples/us-bill.txt --simplify --compress --words 150
 05d02aeef1fc44de85b6d7274549df78c7448fd52ff1256a6c4e033430dee6ba  samples/web-article.txt (defaults)
 05d02aeef1fc44de85b6d7274549df78c7448fd52ff1256a6c4e033430dee6ba  samples/web-article.txt -n 3
 5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --words 150
 036e0784546d6c32d6c16dca7c828683e8c8b44fa31f4f2f348e6e75b4444e50  samples/web-article.txt --centrality centroid
 a77d2341c38f887634fb4e7b256d218be88df16697700726bd200fd8958e5131  samples/web-article.txt --no-repair --lambda 0.5
 5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --compress --words 150
+5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --simplify --compress --words 150
