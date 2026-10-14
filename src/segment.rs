@@ -798,6 +798,12 @@ fn push(chars: &[char], out: &mut Vec<String>) {
 /// Decide whether the punctuation at `p` ends a sentence, given that the next
 /// non-space character is at `k`.
 fn is_boundary(chars: &[char], start: usize, p: usize, run: usize, k: usize) -> bool {
+    // A bibliography entry ("[3] Smith, J. A study of ... Nature, 2019.") is
+    // full of initials and inner full stops; it ends only where the next entry
+    // starts, so each entry stays one (non-candidate) unit.
+    if is_bib_label(chars, start) {
+        return is_bib_label(chars, k);
+    }
     let n = chars.len();
     let mut a = k;
     while a < n && is_opener(chars[a]) && chars[a] != '(' {
@@ -881,6 +887,18 @@ fn is_boundary(chars: &[char], start: usize, p: usize, run: usize, k: usize) -> 
         return starters().contains(next.as_str());
     }
     true
+}
+
+/// Does a numbered reference label such as "[12] " start at `i`? (The same
+/// shape `re_bib_entry` matches.)
+fn is_bib_label(chars: &[char], i: usize) -> bool {
+    if chars.get(i) != Some(&'[') {
+        return false;
+    }
+    let digits = chars[i + 1..].iter().take_while(|c| c.is_ascii_digit()).count();
+    (1..=3).contains(&digits)
+        && chars.get(i + 1 + digits) == Some(&']')
+        && chars.get(i + 2 + digits).is_some_and(|c| c.is_whitespace())
 }
 
 #[cfg(test)]
@@ -1044,5 +1062,145 @@ mod tests {
         assert_eq!(doc.sentences.len(), 3);
         assert_eq!(doc.sentences[0].text, "This is a sentence that has been wrapped across two lines by an editor.");
         assert_ne!(doc.sentences[1].paragraph, doc.sentences[2].paragraph);
+    }
+
+    const SAMPLES: &[&str] = &[
+        include_str!("../samples/web-article.txt"),
+        include_str!("../samples/us-bill.txt"),
+        include_str!("../samples/apache-license.txt"),
+    ];
+
+    /// Invariants `select.rs` relies on without checking.
+    fn assert_well_formed(doc: &Document, opts: &ParseOptions) {
+        for (i, s) in doc.sentences.iter().enumerate() {
+            assert_eq!(s.index, i, "sentence indices are not consecutive");
+            assert!(s.section < doc.sections.len());
+            assert!(doc.sections[s.section].sentences.contains(&i), "sentence {i} outside its section's range");
+            assert_eq!(s.words, s.text.split_whitespace().count(), "word count of {:?}", s.text);
+            assert!(!s.text.is_empty() && s.text == s.text.trim() && !s.text.contains("  ") && !s.text.contains('\n'));
+            if let Some(l) = s.lead_in {
+                assert!(l < i, "lead-in {l} does not precede item {i}");
+                assert!(s.list_item);
+            }
+            if s.candidate {
+                assert!(s.words >= opts.min_words, "short candidate {:?}", s.text);
+                assert!(!doc.sections[s.section].skip, "candidate in a skipped section: {:?}", s.text);
+            }
+            if i > 0 {
+                let p = &doc.sentences[i - 1];
+                assert!(p.section <= s.section && p.paragraph <= s.paragraph, "order broken at {i}");
+            }
+        }
+        // Section ranges tile the sentence list in order.
+        let mut next = 0;
+        for sec in &doc.sections {
+            assert_eq!(sec.sentences.start, next, "{:#?}", doc.sections);
+            next = sec.sentences.end;
+        }
+        assert_eq!(next, doc.sentences.len());
+    }
+
+    fn non_space(s: &str) -> String {
+        s.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    #[test]
+    fn samples_are_well_formed() {
+        for opts in [ParseOptions::default(), ParseOptions { min_words: 1, dehyphenate: true }] {
+            for text in SAMPLES {
+                let doc = parse(text, &opts);
+                assert!(doc.sentences.iter().filter(|s| s.candidate).count() >= 5);
+                assert_well_formed(&doc, &opts);
+            }
+        }
+    }
+
+    #[test]
+    fn splitting_loses_no_text() {
+        // Sentences are verbatim: rejoined, they give back the paragraph.
+        for text in SAMPLES {
+            for para in text.split("\n\n") {
+                let para = collapse_ws(para);
+                let joined: String = split_sentences(&para).concat();
+                assert_eq!(non_space(&joined), non_space(&para));
+            }
+        }
+        for s in ["", " ", "...", "?!", "No terminal punctuation", "Ends with an ellipsis\u{2026}", "\"\"", "``''"] {
+            assert_eq!(non_space(&split_sentences(s).concat()), non_space(s), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn degenerate_input() {
+        for raw in ["", "\n\n\n", "   \t  ", "#", "# \n", "- \n- \n", "\u{000C}\u{00AD}"] {
+            let doc = parse(raw, &ParseOptions::default());
+            assert!(doc.sentences.iter().all(|s| !s.candidate), "{raw:?}: {:#?}", doc.sentences);
+            assert_well_formed(&doc, &ParseOptions::default());
+        }
+    }
+
+    #[test]
+    fn line_endings_do_not_matter() {
+        let lf = SAMPLES[0];
+        let texts = |d: Document| d.sentences.into_iter().map(|s| (s.text, s.section, s.candidate)).collect::<Vec<_>>();
+        let opts = ParseOptions::default();
+        assert_eq!(texts(parse(&lf.replace('\n', "\r\n"), &opts)), texts(parse(lf, &opts)));
+        assert_eq!(texts(parse(&lf.replace('\n', "\r"), &opts)), texts(parse(lf, &opts)));
+    }
+
+    #[test]
+    fn dehyphenation() {
+        let raw = "The committee examined the environ-\nmental impact of the proposed dam carefully.";
+        let on = parse(raw, &ParseOptions { dehyphenate: true, ..Default::default() });
+        assert_eq!(on.sentences[0].text, "The committee examined the environmental impact of the proposed dam carefully.");
+        let off = parse(raw, &ParseOptions::default());
+        assert!(off.sentences[0].text.contains("environ-"), "{:?}", off.sentences[0].text);
+    }
+
+    #[test]
+    fn non_candidates() {
+        let opts = ParseOptions::default();
+        for (s, why) in [
+            ("What exactly did the committee decide on that day?", "question"),
+            ("Figure 3: Accuracy of every model on the test set.", "caption"),
+            ("[12] World Health Organization report on air quality and health, 2021 edition.", "bibliography entry"),
+            ("[12] Smith, J. A study of things and stuff, 2020.", "bibliography entry with initials"),
+            ("This section describes the method in more detail.", "signposting"),
+            ("The following items are included in the package:", "lead-in"),
+            ("12.5 33.1 47.9 88.0 91.2 14.4 63.0", "numbers"),
+            ("Too short to matter.", "short"),
+        ] {
+            let doc = parse(s, &opts);
+            assert!(doc.sentences.iter().all(|x| !x.candidate), "{why} is a candidate: {s}");
+        }
+    }
+
+    #[test]
+    fn bibliography_entries_stay_whole() {
+        // Consecutive entries arrive as one paragraph. Each should come out as
+        // one unit, not split at initials and inner full stops, where a long
+        // title fragment would become a candidate.
+        let refs = "[1] Smith, J. A. Learning to summarize long documents with sentence graphs. Journal of Language Engineering, 12(3), 2020. [2] Jones, K. B. and Lee, M. Extractive methods for very long legislative texts. Proc. ACL, pp. 1-9, 2019. [3] Lee, A. A survey of evaluation metrics for automatic text summarization systems, 2018.";
+        let s = split(refs);
+        assert_eq!(s.len(), 3, "{s:#?}");
+        assert!(s[0].starts_with("[1] ") && s[1].starts_with("[2] ") && s[2].starts_with("[3] "));
+        let doc = parse(&format!("Some ordinary introductory text that is long enough to count.\n\n{refs}"), &ParseOptions::default());
+        assert!(doc.sentences[0].candidate);
+        assert!(doc.sentences[1..].iter().all(|x| !x.candidate), "{:#?}", doc.sentences);
+
+        // Citation markers inside prose do not change how prose is split.
+        assert_eq!(
+            split("The method was proposed earlier [3]. It was later extended [4, 5]. Results improved."),
+            vec!["The method was proposed earlier [3].", "It was later extended [4, 5].", "Results improved."]
+        );
+    }
+
+    #[test]
+    fn deterministic() {
+        for text in SAMPLES {
+            let a = parse(text, &ParseOptions::default());
+            let b = parse(text, &ParseOptions::default());
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
     }
 }

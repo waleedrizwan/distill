@@ -286,4 +286,107 @@ mod tests {
             assert!(is_subsequence(&toks(&out), &toks(s)), "{out:?} is not a subsequence of {s:?}");
         }
     }
+
+    /// Every sentence of the bundled samples (a news page, a bill, a licence).
+    fn sample_sentences() -> Vec<String> {
+        let opts = crate::segment::ParseOptions::default();
+        [include_str!("../samples/web-article.txt"), include_str!("../samples/us-bill.txt"), include_str!("../samples/apache-license.txt")]
+            .iter()
+            .flat_map(|t| crate::segment::parse(t, &opts).sentences.into_iter().map(|s| s.text))
+            .collect()
+    }
+
+    #[test]
+    fn contract_holds_on_real_text() {
+        // The module's promise, checked on every sentence we ship as a sample:
+        // words only removed, never added or reordered; the length floors hold;
+        // `None` exactly when nothing would change; quoted text survives intact.
+        let quoted = Regex::new(r#""[^"]*"|\u{201C}[^\u{201D}]*\u{201D}|``.*?''"#).unwrap();
+        let mut changed = 0;
+        for s in sample_sentences() {
+            let Some(out) = compress(&s) else { continue };
+            changed += 1;
+            assert_ne!(out, s.trim());
+            assert!(is_subsequence(&toks(&out), &toks(&s)), "{out:?} is not a subsequence of {s:?}");
+            let (a, b) = (word_count(&out), word_count(&s));
+            assert!(a >= 5 && a as f32 >= 0.4 * b as f32, "too short: {out:?} from {s:?}");
+            assert!(a < b || out.len() < s.trim().len(), "nothing removed: {out:?}");
+            for q in quoted.find_iter(&s) {
+                assert!(out.contains(q.as_str()), "quotation {:?} altered in {out:?}", q.as_str());
+            }
+            for junk in [" ,", " .", ",,", "( )", "()"] {
+                assert!(!out.contains(junk), "leftover {junk:?} in {out:?}");
+            }
+        }
+        assert!(changed > 0, "no sample sentence was compressed");
+    }
+
+    #[test]
+    fn idempotent() {
+        // A second pass finds nothing more to remove: each rule removes all of
+        // what it matches, so the output is a fixed point.
+        let mut inputs = sample_sentences();
+        inputs.extend(
+            [
+                "(CNN)However, the plan, which was approved on Tuesday, will cost 18 million euros [4].",
+                "Moreover, the results -- which surprised the authors -- held across all five datasets.",
+            ]
+            .map(String::from),
+        );
+        for s in inputs {
+            if let Some(once) = compress(&s) {
+                assert_eq!(compress(&once), None, "second pass changed {once:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn nothing_to_do() {
+        assert_eq!(compress("The council voted to restore the wetlands on Tuesday."), None);
+        assert_eq!(compress(""), None);
+        assert_eq!(compress("   "), None);
+        // Surrounding whitespace alone is not a change.
+        assert_eq!(compress("  The council voted to restore the wetlands on Tuesday.  "), None);
+    }
+
+    #[test]
+    fn unicode_dashes_and_openers() {
+        assert_eq!(
+            c("The mayor \u{2014} who had opposed the plan for years \u{2014} voted in favour of the scheme."),
+            "The mayor voted in favour of the scheme."
+        );
+        // Stacked openers: dateline then connective, first kept word capitalised.
+        assert_eq!(
+            c("(Reuters) -- Meanwhile, shares in the company rose sharply in early trading."),
+            "Shares in the company rose sharply in early trading."
+        );
+        // An opener without its comma is ordinary text.
+        let s = "However hard they tried, the team could not finish the bridge.";
+        assert_eq!(c(s), s);
+    }
+
+    #[test]
+    fn quote_tracking() {
+        let s = "He said \"we will win\" and left.";
+        assert!(!inside_quote(s, 3));
+        assert!(inside_quote(s, s.find("will").unwrap()));
+        assert!(!inside_quote(s, s.find("and").unwrap()));
+        let curly = "She called it \u{201C}a disaster\u{201D} twice.";
+        assert!(inside_quote(curly, curly.find("disaster").unwrap()));
+        assert!(!inside_quote(curly, curly.find("twice").unwrap()));
+        let bill = "by inserting ``or any agency'' after ``department''.";
+        assert!(inside_quote(bill, bill.find("agency").unwrap()));
+        assert!(!inside_quote(bill, bill.find("after").unwrap()));
+    }
+
+    #[test]
+    fn legal_detection() {
+        assert!(is_legal("The Secretary shall issue regulations."));
+        assert!(is_legal("The term \"vessel\" means any watercraft."));
+        assert!(is_legal("(b) Exception.--Nothing in this section applies."));
+        assert!(is_legal("Section 5 is amended by striking subsection (c)."));
+        assert!(!is_legal("The council met on Tuesday to discuss the budget."));
+        // Whole words only: "meanspirited" and "marshall" are not operative text.
+        assert!(!is_legal("Critics called the meanspirited ad unfair to Marshall voters."));
+    }
 }
