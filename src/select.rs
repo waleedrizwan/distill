@@ -30,8 +30,8 @@ pub struct Params {
     /// Number of sentences to select (before context sentences are added).
     /// Ignored when `word_budget` is set.
     pub budget: usize,
-    /// Select sentences up to this many words instead of `budget` sentences
-    /// (context sentences added by repair are not counted).
+    /// Select sentences up to this many words instead of `budget` sentences.
+    /// Context sentences added by repair count against it.
     pub word_budget: Option<usize>,
     /// MMR trade-off: 1.0 = relevance only, 0.0 = diversity only.
     pub lambda: f32,
@@ -96,6 +96,16 @@ pub struct Selection {
     pub picks: Vec<Pick>,
     /// Heading of each top-level section.
     pub groups: Vec<Option<String>>,
+}
+
+/// Budget bookkeeping while picking.
+struct Fill {
+    /// Budget spent per section.
+    used: Vec<f64>,
+    /// Budget spent overall.
+    total: f64,
+    /// Sentences already in the output, picked or as context (word budget only).
+    covered: Vec<bool>,
 }
 
 /// Map every section to its top-level section ("3.2.1 Details" belongs to "3 Model").
@@ -286,6 +296,7 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         if s.lead_in.is_some() {
             penalty += p.dependence_penalty;
         }
+
         rel[ci] = central + lead - penalty;
     }
 
@@ -295,12 +306,26 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
     // A pick costs 1 under a sentence budget and its word count under a word
     // budget; quotas, caps and the overall limit are all in that unit. With a
     // cost of 1 the arithmetic below is exactly integer sentence counting.
+    //
+    // Under a word budget a pick also pays for the context sentences repair will
+    // add for it, minus anything already in the output, so the budget bounds
+    // the whole summary.
     let words_of = |ci: usize| doc.sentences[cand[ci]].words as f64;
-    let cost = |ci: usize| -> f64 {
-        match p.word_budget {
-            Some(_) => words_of(ci),
-            None => 1.0,
+    let chains: Vec<Vec<usize>> = match (p.word_budget, p.repair) {
+        (Some(_), true) => cand.iter().map(|&si| context_chain(doc, si).0).collect(),
+        _ => vec![Vec::new(); n],
+    };
+    let cost = |ci: usize, f: &Fill| -> f64 {
+        if p.word_budget.is_none() {
+            return 1.0;
         }
+        let mut c = if f.covered[cand[ci]] { 0.0 } else { words_of(ci) };
+        for &si in &chains[ci] {
+            if !f.covered[si] {
+                c += doc.sentences[si].words as f64;
+            }
+        }
+        c
     };
     let budget = p.budget.min(n);
     let limit: f64 = match p.word_budget {
@@ -335,13 +360,7 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         })
         .unzip();
 
-    struct Fill {
-        /// Budget spent per section.
-        used: Vec<f64>,
-        /// Budget spent overall.
-        total: f64,
-    }
-    let mut fill = Fill { used: vec![0.0; n_groups], total: 0.0 };
+    let mut fill = Fill { used: vec![0.0; n_groups], total: 0.0, covered: vec![false; doc.sentences.len()] };
     let mut picked: Vec<usize> = Vec::with_capacity(budget); // candidate indices, in pick order
     let mut taken = vec![false; n];
     let mut max_sim = vec![0f32; n]; // similarity to the closest already-picked sentence
@@ -366,8 +385,13 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         match best {
             Some((ci, _)) => {
                 taken[ci] = true;
-                fill.used[group[ci]] += cost(ci);
-                fill.total += cost(ci);
+                let c = cost(ci, fill);
+                fill.used[group[ci]] += c;
+                fill.total += c;
+                fill.covered[cand[ci]] = true;
+                for &si in &chains[ci] {
+                    fill.covered[si] = true;
+                }
                 for other in 0..n {
                     if !taken[other] {
                         let s = sim(ci, other);
@@ -382,15 +406,15 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
             None => false,
         }
     };
-    let fits = |ci: usize, f: &Fill| f.total + cost(ci) <= limit;
+    let fits = |ci: usize, f: &Fill| f.total + cost(ci, f) <= limit;
 
     // Phase 1: every section gets its guaranteed share.
     for (g, &share) in floor.iter().enumerate() {
-        let in_share = |ci: usize, f: &Fill| group[ci] == g && f.used[g] + cost(ci) <= share && fits(ci, f);
+        let in_share = |ci: usize, f: &Fill| group[ci] == g && f.used[g] + cost(ci, f) <= share && fits(ci, f);
         while pick_best(&in_share, &mut picked, &mut taken, &mut fill, &mut max_sim) {}
     }
     // Phase 2: the remainder goes wherever the best sentences are, up to each section's cap.
-    let under_cap = |ci: usize, f: &Fill| f.used[group[ci]] + cost(ci) <= cap[group[ci]] && fits(ci, f);
+    let under_cap = |ci: usize, f: &Fill| f.used[group[ci]] + cost(ci, f) <= cap[group[ci]] && fits(ci, f);
     while pick_best(&under_cap, &mut picked, &mut taken, &mut fill, &mut max_sim) {}
     // Phase 3: if the caps left budget unused (tiny sections), fill from anywhere.
     while pick_best(&fits, &mut picked, &mut taken, &mut fill, &mut max_sim) {}
@@ -409,42 +433,60 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
     }
 
     if p.repair {
-        let max_extra = picked.len().div_ceil(2);
+        // Under a sentence budget, dangling-opener context is capped at half the
+        // picks. Under a word budget it was already paid for when the pick was made.
+        let max_extra = if p.word_budget.is_some() { usize::MAX } else { picked.len().div_ceil(2) };
         let mut extra = 0usize;
         for (rank, &ci) in picked.iter().enumerate() {
-            let mut cur = cand[ci];
-            // A list item needs the sentence that introduces the list (and, for
-            // nested lists, the one that introduces that).
-            if doc.sentences[cur].lead_in.is_some() {
-                // Not counted against the cap: an item without its lead-in is unreadable.
-                for _ in 0..3 {
-                    let Some(lead) = doc.sentences[cur].lead_in else { break };
-                    picks
-                        .entry(lead)
-                        .or_insert(Pick { index: lead, kind: Kind::Context, score: 0.0, rank, group: sentence_group(lead) });
-                    cur = lead;
-                }
-                continue;
-            }
-            // A dangling opener needs the sentence before it (at most two back).
-            for _ in 0..2 {
-                if cur == 0 || extra >= max_extra || !is_dangling(&doc.sentences[cur].text) {
+            let (chain, capped) = context_chain(doc, cand[ci]);
+            for si in chain {
+                if capped && extra >= max_extra {
                     break;
                 }
-                let prev = cur - 1;
-                if doc.sentences[prev].section != doc.sentences[cur].section {
-                    break;
+                if let Entry::Vacant(slot) = picks.entry(si) {
+                    slot.insert(Pick { index: si, kind: Kind::Context, score: 0.0, rank, group: sentence_group(si) });
+                    if capped {
+                        extra += 1;
+                    }
                 }
-                if let Entry::Vacant(slot) = picks.entry(prev) {
-                    slot.insert(Pick { index: prev, kind: Kind::Context, score: 0.0, rank, group: sentence_group(prev) });
-                    extra += 1;
-                }
-                cur = prev;
             }
         }
     }
 
     Selection { picks: picks.into_values().collect(), groups: group_titles }
+}
+
+/// Sentences that must accompany sentence `si` for it to make sense, nearest
+/// first, and whether they count against the sentence-mode context cap.
+///
+/// A list item needs the sentence that introduces its list (and, for nested
+/// lists, the one that introduces that); these are never capped, since an item
+/// without its lead-in is unreadable. A dangling opener ("This...",
+/// "However...") needs the sentence before it, at most two back, within the
+/// same section.
+fn context_chain(doc: &Document, si: usize) -> (Vec<usize>, bool) {
+    let mut chain = Vec::new();
+    let mut cur = si;
+    if doc.sentences[cur].lead_in.is_some() {
+        for _ in 0..3 {
+            let Some(lead) = doc.sentences[cur].lead_in else { break };
+            chain.push(lead);
+            cur = lead;
+        }
+        return (chain, false);
+    }
+    for _ in 0..2 {
+        if cur == 0 || !is_dangling(&doc.sentences[cur].text) {
+            break;
+        }
+        let prev = cur - 1;
+        if doc.sentences[prev].section != doc.sentences[cur].section {
+            break;
+        }
+        chain.push(prev);
+        cur = prev;
+    }
+    (chain, true)
 }
 
 /// Does this sentence open with a word that points back at earlier text?
@@ -592,6 +634,18 @@ mod tests {
             let sel = select(&doc, &e, &Params { word_budget: Some(w), repair: false, ..Default::default() });
             assert!(!sel.picks.is_empty());
             assert!(words(&sel) <= w, "budget {w}, got {} words", words(&sel));
+        }
+        // With repair on, context sentences count against the budget too:
+        // sentence 1 opens "This", so picking it costs its predecessor's words.
+        let doc2 = crate::segment::parse(
+            "Alpha beta gamma delta epsilon zeta eta theta. This result was then confirmed by several other groups. Completely different words appear in this one here today.",
+            &crate::segment::ParseOptions::default(),
+        );
+        let e2 = vec![vec![0.6, 0.8, 0.0], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]];
+        for w in [10, 18, 30] {
+            let sel = select(&doc2, &e2, &Params { word_budget: Some(w), ..Default::default() });
+            let total: usize = sel.picks.iter().map(|x| doc2.sentences[x.index].words).sum();
+            assert!(total <= w.max(9), "budget {w}, got {total} words including context");
         }
         // Shorter than any sentence: still one sentence.
         let sel = select(&doc, &e, &Params { word_budget: Some(2), repair: false, ..Default::default() });

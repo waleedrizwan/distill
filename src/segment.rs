@@ -87,7 +87,7 @@ re!(
 );
 re!(
     re_skip_title,
-    r"(?i)^(?:references?|bibliography|works cited|literature cited|acknowledge?ments?|funding|conflicts? of interests?|competing interests?|declaration of (?:competing )?interests?|author contributions?|authors'? contributions?|table of contents|contents|keywords|index|about the authors?|related (?:articles|links|posts|stories)|see also|further reading|footnotes|endnotes|data availability(?: statement)?|supplementary (?:materials?|information))$"
+    r"(?i)^(?:references?|bibliography|works cited|literature cited|acknowledge?ments?|funding|conflicts? of interests?|competing interests?|declaration of (?:competing )?interests?|author contributions?|authors'? contributions?|table of contents|contents|keywords|index|about the authors?|related (?:articles|links|posts|stories|content|coverage)|see also|comments? \(\d+\)|\d+ comments|reader comments|leave a (?:comment|reply)|join the (?:conversation|discussion)|you (?:may|might) also like|more from [\w .'&-]+|most (?:read|popular|viewed)|recommended(?: for you| reading)?|trending(?: now)?|(?:sign up for )?(?:our )?newsletters?|advertisement|share this (?:article|story|page)|further reading|footnotes|endnotes|data availability(?: statement)?|supplementary (?:materials?|information))$"
 );
 re!(
     re_known_heading,
@@ -98,6 +98,32 @@ re!(
     r"^(?:Figure|Fig\.|Table|Tab\.|Source|Sources|Photo|Image|Credit|Chart|Exhibit|Listing|Algorithm|Copyright|\u{00A9})\s*[\dIVX.\-]*\s*[:.|]"
 );
 re!(re_bib_entry, r"^\[\d{1,3}\]\s");
+// Web page furniture: consent banners, link labels, social and newsletter
+// prompts, copyright and licence footers. Phrased the way sites address the
+// reader, so ordinary sentences about cookies or newsletters still count.
+re!(
+    re_boilerplate,
+    r"(?ix)
+      ^(?:read\ more|read\ also|also\ read|see\ also|related|more|watch|video|photos?|gallery|listen|recommended|sponsored|advertisement|ad)\s*[:|>\u{00BB}]
+    | ^click\ here\b
+    | ^skip\ to\ (?:main\ )?content\b
+    | ^(?:\u{00A9}|copyright\ \u{00A9}?)\s*\d{4}
+    | \ball\ rights\ reserved\b
+    | \b(?:is|are)\ (?:licensed|available)\ under\ (?:a|the)\ creative\ commons\b
+    | \b(?:we|this\ (?:web)?site|our\ (?:web)?site)\ uses?\ cookies\b
+    | \bby\ (?:continuing\ to\ (?:use|browse)|using)\ (?:this|our)\ (?:web)?site\b
+    | \b(?:accept|manage)\ (?:all\ )?cookies\b
+    | \b(?:sign\ up|subscribe)\ (?:to|for)\ (?:our|the)\ (?:free\ )?(?:\w+\ )?newsletters?\b
+    | ^(?:please\ )?(?:follow|like)\ (?:us|@\w+)\b
+    | \bfollow\ (?:us|@\w+)\ on\ (?:twitter|x|facebook|instagram|linkedin|tiktok|threads|bluesky)\b
+    | ^share\ (?:this|on)\b
+    | \b(?:e-?mail|send)\ (?:this|it)\ to\ a\ friend\b
+    | \bdownload\ (?:our|the)\ (?:free\ )?app\b
+    | \b(?:enable|turn\ on)\ javascript\b|\bjavascript\ is\ (?:disabled|required)\b
+    "
+);
+// Bylines and datelines are page metadata, not section headings.
+re!(re_byline, r"(?i)^(?:by\s+\p{Lu}|(?:published|updated|last updated|posted)\b)");
 // "This section describes ...", "The rest of the paper is organized as follows."
 re!(
     re_meta,
@@ -264,6 +290,9 @@ fn is_heading_line(line: &str, next_block_words: usize) -> bool {
     let bare = t.trim_end_matches([':', '.']).trim();
     let unnumbered = re_strip_numbering().replace(bare, "");
 
+    if re_byline().is_match(t) {
+        return false;
+    }
     if re_known_heading().is_match(unnumbered.trim()) || re_skip_title().is_match(unnumbered.trim()) {
         return true;
     }
@@ -488,6 +517,9 @@ impl Builder {
         if re_caption().is_match(t) || re_bib_entry().is_match(t) || re_meta().is_match(t) {
             return false;
         }
+        if re_boilerplate().is_match(t) || is_menu(t) {
+            return false;
+        }
         let non_space = t.chars().filter(|c| !c.is_whitespace()).count().max(1);
         let alpha = t.chars().filter(|c| c.is_alphabetic()).count();
         if (alpha as f32) / (non_space as f32) < 0.6 {
@@ -604,6 +636,13 @@ impl Builder {
 fn ends_with_lead_in(s: &str) -> bool {
     let t = s.trim_end().trim_end_matches(is_closer).trim_end();
     t.ends_with(':') || t.ends_with("--") || t.ends_with('\u{2014}')
+}
+
+/// A run of short links ("Home | World | Business | about us"): three or more
+/// items separated by bars or bullets, averaging four words or fewer.
+fn is_menu(t: &str) -> bool {
+    let items: Vec<&str> = t.split(['|', '\u{2022}', '\u{00B7}']).map(str::trim).filter(|x| !x.is_empty()).collect();
+    items.len() >= 3 && items.iter().map(|x| word_count(x)).sum::<usize>() <= 4 * items.len()
 }
 
 fn is_skip_title(title: &str) -> bool {
@@ -919,6 +958,43 @@ mod tests {
         assert_eq!(doc.sections[2].level, 2);
         assert!(doc.sections[3].skip);
         assert!(doc.sentences.iter().filter(|s| s.section == 3).all(|s| !s.candidate));
+    }
+
+    #[test]
+    fn web_boilerplate() {
+        let doc = parse(include_str!("../samples/web-article.txt"), &ParseOptions::default());
+        let candidates: Vec<&str> = doc.sentences.iter().filter(|s| s.candidate).map(|s| s.text.as_str()).collect();
+        for junk in [
+            "Home | World",
+            "We use cookies",
+            "By continuing to use this site",
+            "READ MORE:",
+            "Share this article",
+            "Sign up for our free daily newsletter",
+            "Click here",
+            "Follow @CityDesk",
+            "best news I have read",
+            "Privacy policy |",
+            "All rights reserved",
+            "Creative Commons",
+        ] {
+            assert!(!candidates.iter().any(|c| c.contains(junk)), "boilerplate is a candidate: {junk}");
+        }
+        assert!(candidates.iter().any(|c| c.starts_with("The city council voted")));
+        assert!(candidates.iter().any(|c| c.starts_with("Ecologists say")));
+        // Byline and dateline are not headings.
+        assert!(doc.sections.iter().all(|s| s.title.as_deref().is_none_or(|t| !t.starts_with("By ") && !t.starts_with("Published"))));
+        // Ordinary sentences about the same topics are kept.
+        for ok in [
+            "The bakery says it uses cookies from a family recipe in every gift box.",
+            "Readers who subscribe to the print edition receive a weekly supplement.",
+            "Copyright law protects the expression of an idea, not the idea itself.",
+            "(C) by striking the period at the end and inserting a semicolon.",
+            "(c) by redesignating paragraphs (5) and (6) as paragraphs (6) and (7).",
+        ] {
+            let d = parse(ok, &ParseOptions::default());
+            assert!(d.sentences[0].candidate, "dropped: {ok}");
+        }
     }
 
     #[test]

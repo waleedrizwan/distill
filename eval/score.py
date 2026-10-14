@@ -5,7 +5,8 @@
     cargo build --release
     python3 eval/score.py              # both budget modes, all sets
     python3 eval/score.py --budget words --sets cnndm --save before.json
-    python3 eval/score.py --compare before.json   # show the change per cell
+    python3 eval/score.py --compare before.json   # change per cell, with a
+                                                  # paired bootstrap interval
 
 Methods
   lead      the first sentences of the document, as distill segments it
@@ -31,6 +32,7 @@ other and with the README, not with published papers. Standard library only.
 import argparse
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -41,11 +43,16 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SENTENCES = {"cnndm": 3, "billsum": 5, "arxiv": 6}
+DEV_SETS = "cnndm-dev,billsum-dev"
 METHODS = ["lead", "centroid", "distill"]
 CENTROID_FLAGS = [
     "--centrality", "centroid", "--lambda", "1", "--lead", "0", "--penalty", "0",
     "--no-repair", "--section-weight", "0", "--boost", "1",
 ]
+
+
+def base(set_name):
+    return set_name.split("-")[0]
 
 
 def tokens(text):
@@ -133,7 +140,7 @@ def score_doc(job):
         n_words, n_sent = ref_words, None
         flags = ["--words", str(ref_words)]
     else:
-        n_words, n_sent = None, SENTENCES[set_name]
+        n_words, n_sent = None, SENTENCES[base(set_name)]
         flags = ["-n", str(n_sent)]
     picks = {
         "lead": lead(segments(binary, doc["text"], env), n_sent, n_words),
@@ -160,10 +167,18 @@ def mean(xs):
     return sum(xs) / len(xs) if xs else 0.0
 
 
+def bootstrap(diffs, n=2000, seed=0):
+    """95% interval for the mean of paired per-document differences (fixed seed)."""
+    rng = random.Random(seed)
+    k = len(diffs)
+    means = sorted(sum(diffs[rng.randrange(k)] for _ in range(k)) / k for _ in range(n))
+    return means[int(0.025 * n)], means[int(0.975 * n) - 1]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bin", default=str(ROOT / "target" / "release" / "distill"))
-    ap.add_argument("--sets", default="cnndm,billsum,arxiv")
+    ap.add_argument("--sets", default="cnndm,billsum,arxiv", help=f"comma-separated; tune on {DEV_SETS}")
     ap.add_argument("--budget", choices=["sentences", "words", "both"], default="both")
     ap.add_argument("--limit", type=int, default=0, help="score only the first N documents per set")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
@@ -182,6 +197,7 @@ def main():
     before = json.loads(Path(args.compare).read_text()) if args.compare else {}
 
     table = {}
+    per_doc = {}
     rows = ["| Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words |", "|---|---|---|---|---|---|---|"]
     for set_name in [s for s in args.sets.split(",") if s]:
         docs = load(set_name, args.limit)
@@ -190,12 +206,13 @@ def main():
             with ThreadPoolExecutor(args.jobs) as pool:
                 results = list(pool.map(score_doc, jobs))
             ref_words = mean([r["reference"]["words"] for r in results])
-            label = f"{SENTENCES[set_name]} sentences" if budget == "sentences" else f"ref length ({ref_words:.0f} w)"
+            label = f"{SENTENCES[base(set_name)]} sentences" if budget == "sentences" else f"ref length ({ref_words:.0f} w)"
             for i, m in enumerate(METHODS):
                 key = f"{set_name}/{budget}/{m}"
                 cell = {k: mean([r[m][k] for r in results]) for k in ("r1", "r2", "rl", "words")}
                 cell = {k: v * 100 if k != "words" else v for k, v in cell.items()}
                 table[key] = cell
+                per_doc[key] = [round(r[m]["r2"] * 100, 3) for r in results]
                 old = before.get(key)
 
                 def fmt(k, digits=1):
@@ -211,8 +228,19 @@ def main():
             print(f"scored {set_name} / {budget}", file=sys.stderr)
 
     print("\n".join(rows))
+    old_docs = before.get("per_doc", {})
+    lines = []
+    for key, now in per_doc.items():
+        was = old_docs.get(key)
+        if key.endswith("/distill") and was and len(was) == len(now):
+            lo, hi = bootstrap([a - b for a, b in zip(now, was)])
+            verdict = "better" if lo > 0 else "worse" if hi < 0 else "no clear change"
+            lines.append(f"{key.rsplit('/', 1)[0]}: ROUGE-2 {mean(now) - mean(was):+.2f}, 95% CI [{lo:+.2f}, {hi:+.2f}], {verdict}")
+    if lines:
+        print("\nPaired bootstrap, distill vs --compare file:\n" + "\n".join(lines))
     if args.save:
-        Path(args.save).write_text(json.dumps({"extra": args.extra, "limit": args.limit, **table}, indent=1) + "\n")
+        out = {"extra": args.extra, "limit": args.limit, **table, "per_doc": per_doc}
+        Path(args.save).write_text(json.dumps(out, indent=1) + "\n")
 
 
 if __name__ == "__main__":

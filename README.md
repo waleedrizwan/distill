@@ -30,7 +30,7 @@ Input is plain text or Markdown, from a file or stdin. For PDFs, convert first:
 distill [FILE]            summarize FILE (or stdin)
   -n, --sentences N       number of sentences (default: ~10% of the document, 3 to 15)
   -r, --ratio R           or a fraction of the document, e.g. 0.05
-  -w, --words N           or up to N words (context sentences are extra)
+  -w, --words N           or up to N words, context sentences included
       --json              sentence positions, sections and scores
       --show-segments     print how the text was split, without summarizing
       --no-repair         don't add context sentences
@@ -87,45 +87,48 @@ the numbers are only comparable within this table.
 
 Each set is scored twice. "N sentences" is the original setup. "ref length"
 gives every method a word budget equal to that document's reference summary,
-which removes the advantage of picking longer sentences. The Words column is the
-average summary length; distill's includes the context sentences it adds for
-readability, which the word budget does not count yet.
+which removes the advantage of picking longer sentences. Under a word budget,
+the context sentences distill adds for readability count against the budget.
 
 | Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words |
 |---|---|---|---|---|---|---|
 | cnndm (n=100) | 3 sentences | lead | 29.4 | 12.3 | 21.0 | 65 |
-|  |  | centroid | 26.7 | 8.9 | 17.9 | 76 |
+|  |  | centroid | 26.7 | 9.0 | 17.9 | 76 |
 |  |  | distill | **29.5** | **11.9** | **20.8** | **80** |
 |  | ref length (34 w) | lead | 27.5 | 8.9 | 19.4 | 34 |
 |  |  | centroid | 25.8 | 7.0 | 17.4 | 32 |
-|  |  | distill | **28.2** | **9.5** | **19.7** | **37** |
+|  |  | distill | **28.0** | **9.2** | **19.7** | **32** |
 | billsum (n=60) | 5 sentences | lead | 36.6 | 16.9 | 24.2 | 115 |
 |  |  | centroid | 38.1 | 17.1 | 23.5 | 236 |
 |  |  | distill | **38.9** | **18.7** | **25.0** | **244** |
 |  | ref length (168 w) | lead | 42.9 | 19.7 | 27.4 | 166 |
 |  |  | centroid | 41.2 | 16.3 | 24.6 | 164 |
-|  |  | distill | **43.1** | **19.8** | **26.7** | **217** |
+|  |  | distill | **42.6** | **18.6** | **26.2** | **162** |
 | arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 |
 |  |  | centroid | 28.8 | 8.8 | 15.9 | 326 |
 |  |  | distill | **35.1** | **12.4** | **18.8** | **266** |
 |  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 |
 |  |  | centroid | 36.0 | 10.9 | 21.5 | 140 |
-|  |  | distill | **38.5** | **12.4** | **20.7** | **156** |
+|  |  | distill | **37.1** | **11.4** | **20.3** | **140** |
 
 What this shows:
 
-- **News:** distill matches the first-three-sentences baseline, which is
-  famously hard to beat, without being told the text is news. At equal length it
-  is slightly ahead, though with about three more words per summary.
-- **Bills:** the advantage at five sentences came mostly from length. Under a
-  word budget distill ties lead on ROUGE while using about 30% more words,
-  almost all of it context sentences pulled in by repair.
+- **News:** at equal length distill is slightly ahead of the first sentences,
+  which is a famously strong baseline on news, without being told the text is
+  news. The margin is within noise.
+- **Bills:** at equal length the first sentences beat distill by about one
+  ROUGE-2 point. distill's earlier lead at five sentences came from picking
+  longer sentences and adding context on top of the budget.
 - **Papers:** ten documents is too few to read much into. The arXiv set is also
   lowercased and pre-tokenised, which is not what the splitter was built for.
 
-`eval/baseline.json` holds these averages. After a change, run
-`python3 eval/score.py --compare eval/baseline.json` to see the difference in
-every cell.
+Knobs are tuned on separate development sets (500 CNN/DailyMail validation
+articles and 300 BillSum training bills), never on the test sets above. Run
+`python3 eval/score.py --sets cnndm-dev,billsum-dev --budget words --compare
+eval/dev-baseline.json` after a change. It prints the difference in every cell
+and a paired bootstrap 95% interval for distill's ROUGE-2, so a change only
+counts when the interval excludes zero. `eval/baseline.json` holds the test
+results in the same format.
 
 Determinism is checked by `eval/determinism.sh`: the committed samples are
 summarized in several modes with 1 and 4 threads, and the output hashes must
@@ -149,8 +152,10 @@ on Linux.
   article and 3 s for a 3,700-word paper there. Everything else takes
   milliseconds.
 - Sentences over 256 word-pieces are ranked on their first 256.
-- Garbage in, garbage out: boilerplate left in the file (site navigation,
-  licence footers) can be selected.
+- Common web page furniture is filtered out before ranking: consent banners,
+  "Read more:" and "Click here" links, share and follow prompts, newsletter
+  sign-ups, link menus, copyright and licence footers, and sections such as
+  "Related articles". Anything else left in the file can still be selected.
 
 ## Tests
 
