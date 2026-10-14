@@ -93,16 +93,32 @@ with the first sentences on news and behind them on bills. The unsupervised
 signal looks saturated, which is the headroom Milestone 3 needs, so it goes
 ahead with MiniLM as the frozen encoder.
 
-## Milestone 3: learned salience head (only if Milestone 2 leaves headroom)
+## Milestone 3: learned salience head
 
-- [ ] `eval/oracle.py`: greedy oracle extractive labels against the references
-  on the training splits.
-- [ ] Features: the frozen sentence embedding plus position, length, position in
-  section, and `is_dangling`.
-- [ ] Fit logistic regression offline, ship the weights (a few thousand floats)
-  as a small file next to the model, apply them in `src/select.rs` as a dot
-  product. Deterministic, no new dependencies.
-- [ ] Keep it only if it beats Milestone 2 on both news and bills.
+- [x] `eval/train_salience.py`: greedy oracle extractive labels (mean of
+  ROUGE-1 and ROUGE-2 F1) on 3,000 CNN/DailyMail and 1,500 BillSum training
+  documents, kept apart from the development and test sets.
+- [x] Features: the frozen MiniLM sentence embedding plus document and section
+  centrality, position, position in section, length, dangling and
+  external-reference flags, list membership and summary-section membership.
+  `distill --dump-features` prints exactly what the binary computes.
+- [x] Logistic regression fitted offline with numpy (Newton's method, L2 chosen
+  on held-out training documents). The weights, about 400 floats plus
+  standardisation, live in `src/salience.json` and are compiled in. Scoring is
+  a dot product in fixed order. The head checks that the loaded encoder
+  matches the one it was trained on and switches off otherwise.
+- [x] **Result: kept, on by default at `--salience 0.5`.** Chosen on the
+  development sets, where 0.5 gave the best balance (news +0.62 ROUGE-2, not
+  significant; bills +1.40, significant). On the test sets at equal length:
+  bills +1.86 and papers +2.18 (both significant), news +0.36 (not
+  significant). distill now beats the first-sentences baseline at equal length
+  on all three test sets.
+
+Follow-up found while reading output: the sentence splitter breaks
+multi-sentence quotations, so a pick can open with an unclosed quote mark
+("I just let frustration get the better of me."). The head is more willing than
+centrality to pick such fragments. Keeping quotations whole in
+`src/segment.rs`, or an unbalanced-quote feature, would fix it.
 
 ## Milestone 4: simplifier, three opt-in layers
 

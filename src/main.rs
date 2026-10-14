@@ -1,4 +1,5 @@
 mod embed;
+mod salience;
 mod segment;
 mod select;
 
@@ -69,6 +70,15 @@ struct Args {
     /// Extra budget share for the opening section and abstract/summary/conclusion
     #[arg(long, default_value_t = 1.5)]
     boost: f32,
+
+    /// Weight of the learned salience score against centrality (0 = centrality
+    /// only, 1 = salience only). Used only with the model it was trained on.
+    #[arg(long, default_value_t = 0.5)]
+    salience: f32,
+
+    /// Print every candidate's ranking features as JSON (for eval/train_salience.py)
+    #[arg(long, hide = true)]
+    dump_features: bool,
 
     /// Don't pull in the preceding sentence for "This...", "However..." openers
     #[arg(long)]
@@ -204,7 +214,7 @@ fn run() -> Result<()> {
     let vectors = embed_cached(&embedder, &texts, args.batch_size)?;
     let t3 = Instant::now();
 
-    let params = select::Params {
+    let mut params = select::Params {
         budget,
         word_budget: args.words,
         lambda: args.lambda.clamp(0.0, 1.0),
@@ -216,8 +226,44 @@ fn run() -> Result<()> {
         dependence_penalty: args.penalty,
         summary_section_boost: args.boost.max(0.0),
         repair: !args.no_repair,
+        salience: None,
+        salience_weight: args.salience.clamp(0.0, 1.0),
+        want_features: args.dump_features,
     };
+    let mut head_note = "salience head off";
+    if params.salience_weight > 0.0 {
+        match salience::Head::builtin() {
+            Some(h) if h.encoder == embedder.encoder() => {
+                params.salience = Some(std::sync::Arc::new(h));
+                head_note = "salience head on";
+            }
+            Some(_) => head_note = "salience head skipped: trained for a different model",
+            None => head_note = "salience head skipped: none built in",
+        }
+    }
     let selection = select::select(&doc, &vectors, &params);
+    if args.dump_features {
+        #[derive(Serialize)]
+        struct Row<'a> {
+            index: usize,
+            words: usize,
+            text: &'a str,
+            features: Vec<f32>,
+        }
+        let rows: Vec<Row> = selection
+            .features
+            .iter()
+            .map(|(i, f)| Row {
+                index: *i,
+                words: doc.sentences[*i].words,
+                text: &doc.sentences[*i].text,
+                // Six significant digits keep the dump small and stable.
+                features: f.iter().map(|x| format!("{x:.6e}").parse().unwrap_or(*x)).collect(),
+            })
+            .collect();
+        println!("{}", serde_json::to_string(&serde_json::json!({ "encoder": embedder.encoder(), "candidates": rows }))?);
+        return Ok(());
+    }
     let picks = &selection.picks;
     let t4 = Instant::now();
 
@@ -270,7 +316,7 @@ fn run() -> Result<()> {
         );
         let st = embedder.settings();
         eprintln!(
-            "model {} ({:?} pooling, {} tokens{})",
+            "embedding model in {} ({:?} pooling, {} tokens{}), {head_note}",
             model_dir.display(),
             st.pooling,
             st.max_tokens,

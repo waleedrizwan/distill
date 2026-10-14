@@ -12,6 +12,7 @@
 //! tie-breaking, so the same input always produces the same picks.
 
 use crate::embed::{dot, normalize};
+use crate::salience::Head;
 use crate::segment::Document;
 use regex::Regex;
 use std::collections::btree_map::{BTreeMap, Entry};
@@ -52,6 +53,13 @@ pub struct Params {
     pub summary_section_boost: f32,
     /// Pull in the previous sentence when a pick starts with "This", "However", ...
     pub repair: bool,
+    /// Learned salience head (see `salience.rs`); `None` uses centrality only.
+    pub salience: Option<std::sync::Arc<Head>>,
+    /// Share of the centrality term replaced by the learned salience score
+    /// (0 = centrality only, 1 = salience only). Ignored without a head.
+    pub salience_weight: f32,
+    /// Return every candidate's feature vector in `Selection::features`.
+    pub want_features: bool,
 }
 
 impl Default for Params {
@@ -68,6 +76,9 @@ impl Default for Params {
             dependence_penalty: 0.08,
             summary_section_boost: 1.5,
             repair: true,
+            salience: None,
+            salience_weight: 0.0,
+            want_features: false,
         }
     }
 }
@@ -96,6 +107,9 @@ pub struct Selection {
     pub picks: Vec<Pick>,
     /// Heading of each top-level section.
     pub groups: Vec<Option<String>>,
+    /// With `Params::want_features`: (sentence index, features) per candidate,
+    /// hand features as in `salience::HAND_FEATURES` followed by the embedding.
+    pub features: Vec<(usize, Vec<f32>)>,
 }
 
 /// Budget bookkeeping while picking.
@@ -198,7 +212,7 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
     let cand: Vec<usize> = doc.sentences.iter().filter(|s| s.candidate).map(|s| s.index).collect();
     assert_eq!(cand.len(), embeddings.len());
     if cand.is_empty() || p.word_budget.unwrap_or(p.budget) == 0 {
-        return Selection { picks: Vec::new(), groups: group_titles };
+        return Selection { picks: Vec::new(), groups: group_titles, features: Vec::new() };
     }
     let n = cand.len();
     let n_groups = group_titles.len().max(1);
@@ -274,9 +288,18 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         }
     }
 
-    // Relevance = centrality + lead bonus - dependence penalty.
+    // Relevance = centrality (optionally blended with learned salience)
+    // + lead bonus - dependence penalty.
+    let first_real_group = (0..n_groups).find(|&g| members[g].len() >= 2);
+    let is_summary_group = |g: usize| {
+        n_groups > 1 && (Some(g) == first_real_group || group_titles[g].as_deref().map(summary_like).unwrap_or(false))
+    };
+    let use_head = p.salience.is_some() && p.salience_weight > 0.0;
     let mut pos_in_group = vec![0usize; n_groups];
-    let mut rel = vec![0f32; n];
+    let mut central = vec![0f32; n];
+    let mut lead_bonus = vec![0f32; n];
+    let mut penalties = vec![0f32; n];
+    let mut feats: Vec<Vec<f32>> = Vec::new();
     for ci in 0..n {
         let s = &doc.sentences[cand[ci]];
         let g = group[ci];
@@ -284,21 +307,62 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         pos_in_group[g] += 1;
         // Section-level centrality means little in very small sections.
         let sw = if n_groups == 1 { 0.0 } else { p.section_weight * ((members[g].len() as f32 - 1.0) / 4.0).clamp(0.0, 1.0) };
-        let central = (1.0 - sw) * doc_c[ci] + sw * sec_c[ci];
+        central[ci] = (1.0 - sw) * doc_c[ci] + sw * sec_c[ci];
         let lead = p.lead / (1.0 + pos as f32);
+        let dangling = is_dangling(&s.text);
+        let elsewhere = points_elsewhere(&s.text);
         let mut penalty = 0.0;
-        if is_dangling(&s.text) {
+        if dangling {
             penalty += p.dependence_penalty;
         }
-        if points_elsewhere(&s.text) {
+        if elsewhere {
             penalty += p.dependence_penalty;
         }
         if s.lead_in.is_some() {
             penalty += p.dependence_penalty;
         }
+        lead_bonus[ci] = lead;
+        penalties[ci] = penalty;
 
-        rel[ci] = central + lead - penalty;
+        if use_head || p.want_features {
+            let flag = |b: bool| if b { 1.0 } else { 0.0 };
+            let mut f = vec![
+                doc_c[ci],
+                sec_c[ci],
+                ci as f32 / (n.max(2) - 1) as f32,
+                (1.0 + ci as f32).ln(),
+                pos as f32 / (members[g].len().max(2) - 1) as f32,
+                flag(pos == 0),
+                (s.words.max(1) as f32).ln(),
+                flag(dangling),
+                flag(elsewhere),
+                flag(s.lead_in.is_some()),
+                flag(s.list_item),
+                flag(is_summary_group(g)),
+            ];
+            debug_assert_eq!(f.len(), crate::salience::HAND_FEATURES.len());
+            f.extend_from_slice(&embeddings[ci]);
+            feats.push(f);
+        }
     }
+    // The head's log-odds, rescaled to 0..1 within the document like centrality.
+    let salience: Option<Vec<f32>> = match (&p.salience, use_head) {
+        (Some(h), true) if feats.first().map(|f| f.len()) == Some(h.weights.len()) => {
+            let mut v: Vec<f32> = feats.iter().map(|f| h.logit(f)).collect();
+            rescale(&mut v);
+            Some(v)
+        }
+        _ => None,
+    };
+    let rel: Vec<f32> = (0..n)
+        .map(|ci| {
+            let c = match &salience {
+                Some(sal) => (1.0 - p.salience_weight) * central[ci] + p.salience_weight * sal[ci],
+                None => central[ci],
+            };
+            c + lead_bonus[ci] - penalties[ci]
+        })
+        .collect();
 
     // Per-section share of the budget. Sub-linear weighting keeps a long
     // section from crowding out short but important ones.
@@ -332,12 +396,10 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         Some(w) => w as f64,
         None => budget as f64,
     };
-    let first_real_group = (0..n_groups).find(|&g| members[g].len() >= 2);
     let weights: Vec<f64> = (0..n_groups)
         .map(|g| {
             let mut w = (group_words[g] as f64).powf(0.75);
-            let titled_summary = group_titles[g].as_deref().map(summary_like).unwrap_or(false);
-            if n_groups > 1 && (Some(g) == first_real_group || titled_summary) {
+            if is_summary_group(g) {
                 w *= p.summary_section_boost as f64;
             }
             w
@@ -453,7 +515,8 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         }
     }
 
-    Selection { picks: picks.into_values().collect(), groups: group_titles }
+    let features = if p.want_features { cand.iter().copied().zip(feats).collect() } else { Vec::new() };
+    Selection { picks: picks.into_values().collect(), groups: group_titles, features }
 }
 
 /// Sentences that must accompany sentence `si` for it to make sense, nearest

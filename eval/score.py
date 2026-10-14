@@ -47,7 +47,7 @@ DEV_SETS = "cnndm-dev,billsum-dev"
 METHODS = ["lead", "centroid", "distill"]
 CENTROID_FLAGS = [
     "--centrality", "centroid", "--lambda", "1", "--lead", "0", "--penalty", "0",
-    "--no-repair", "--section-weight", "0", "--boost", "1",
+    "--no-repair", "--section-weight", "0", "--boost", "1", "--salience", "0",
 ]
 
 
