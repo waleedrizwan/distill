@@ -10,7 +10,8 @@ sentences from a document and prints them **verbatim**, in their original order.
   only from a fixed, hand-reviewed table (`src/lexicon.tsv`). With `--split`,
   a long sentence can become two, losing a joining "and".
 - **Deterministic.** Same input and same binary give byte-identical output.
-- **Local.** One binary (12 MB) plus a 90 MB model file. No network at run time.
+- **Local.** One binary (12 MB) plus a 90 MB model file. No network at run
+  time, unless the input you give it is a URL.
 
 A small neural model (all-MiniLM-L6-v2) is used, but only to turn each sentence
 into a vector for *ranking*. It never writes anything. A learned salience score,
@@ -31,9 +32,14 @@ automatically: on an M4 it embeds about twice as fast as the plain build, with
 byte-identical output. It is developed on macOS (Apple Silicon); CI also builds
 and tests on Linux, where `--features mkl` is the Intel equivalent.
 
-Input is plain text, Markdown or PDF, from a file or stdin. A PDF is read
-directly (`distill paper.pdf`); `distill --extract-text paper.pdf` prints the
-text it was read as. Scanned PDFs without a text layer have no text to read.
+Input is plain text, Markdown, HTML or PDF, from a file, stdin or a URL. A
+PDF is read directly (`distill paper.pdf`); `distill --extract-text
+paper.pdf` prints the text it was read as. Scanned PDFs without a text layer
+have no text to read. `distill https://...` downloads the page or PDF (an
+arXiv `abs/` link fetches the paper's PDF); this is the only time distill
+uses the network. From a web page it keeps the `<article>` or `<main>` text
+and drops scripts, menus, headers, footers, asides, figures and lists of
+links (`src/html.rs`).
 
 ```
 distill [FILE]            summarize FILE (or stdin)
