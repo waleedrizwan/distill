@@ -5,11 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ./fetch-model.sh
-if [ "$(uname -s)" = Darwin ]; then
-  cargo build --release --features accelerate
-else
-  cargo build --release
-fi
+# On macOS the build uses Apple's Accelerate framework automatically.
+cargo build --release
 
 # Fixed by the "key" in extension/manifest.json.
 EXT_ID=hdjlniolemieldophfomihofgmbiplfo

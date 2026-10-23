@@ -71,12 +71,18 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   let reply;
   try {
-    reply = await chrome.runtime.sendNativeMessage(HOST, { text: captured.text });
+    const { plain, glossary } = await settings();
+    reply = await chrome.runtime.sendNativeMessage(HOST, { text: captured.text, plain, glossary });
   } catch (e) {
     reply = { ok: false, error: `can't reach the distill helper (${e.message}). Run install.sh.` };
   }
   send({ type: "distill-apply", id: captured.id, ...reply }).catch(() => {});
 });
+
+/** The switches on the options page. */
+function settings() {
+  return chrome.storage.sync.get({ plain: false, glossary: true });
+}
 
 async function isPdf(url) {
   if (!url || !/^(https?|file):/.test(url)) return false;

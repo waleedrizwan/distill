@@ -37,6 +37,7 @@ async function main() {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`);
   const data = new Uint8Array(await res.arrayBuffer());
+  pdfBase64 = toBase64(data); // before PDF.js takes over the buffer
   const pdf = await pdfjs.getDocument({ data }).promise;
 
   const pages = [];
@@ -59,7 +60,76 @@ async function main() {
   if (!doc.textContent.trim()) {
     throw new Error("no selectable text in it (it may be a scanned image)");
   }
+  const button = document.getElementById("summarize");
+  button.disabled = false;
+  button.addEventListener("click", summarizePaper);
   await distillPending();
+}
+
+let pdfBase64 = "";
+
+function toBase64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+// ---- whole-paper summary ---------------------------------------------------
+
+/** A short summary of every section, from distill's own reading of the PDF. */
+async function summarizePaper() {
+  const button = document.getElementById("summarize");
+  button.disabled = true;
+  document.getElementById("paper-summary")?.remove();
+  const panel = document.createElement("section");
+  panel.id = "paper-summary";
+  panel.innerHTML = '<div class="status"><span class="distill-spinner"></span> Summarizing the paper…</div>';
+  doc.prepend(panel);
+  panel.scrollIntoView({ block: "start" });
+
+  let reply;
+  try {
+    const { plain, glossary } = await chrome.storage.sync.get({ plain: false, glossary: true });
+    reply = await chrome.runtime.sendNativeMessage(HOST, { pdf: pdfBase64, by_section: 2, plain, glossary });
+  } catch (e) {
+    reply = { ok: false, error: `can't reach the distill helper (${e.message}). Run install.sh.` };
+  }
+  button.disabled = false;
+  panel.textContent = "";
+  if (!reply.ok) {
+    panel.className = "error";
+    panel.textContent = `Couldn't summarize: ${reply.error}`;
+    return;
+  }
+  const h = document.createElement("h2");
+  h.textContent = "Section by section";
+  panel.append(h);
+  // distill prints "[Heading]" before each section's sentences.
+  for (const line of reply.summary.split("\n")) {
+    if (!line.trim()) continue;
+    const heading = line.match(/^\[(.*)\]$/);
+    const el = document.createElement(heading ? "h3" : "p");
+    el.textContent = heading ? heading[1] : line;
+    panel.append(el);
+  }
+  if (reply.glossary?.length) {
+    const gh = document.createElement("h3");
+    gh.textContent = "Terms";
+    const dl = document.createElement("dl");
+    for (const { term, definition } of reply.glossary) {
+      const dt = document.createElement("dt");
+      dt.textContent = term;
+      const dd = document.createElement("dd");
+      dd.textContent = definition;
+      dl.append(dt, dd);
+    }
+    panel.append(gh, dl);
+  }
+  const close = document.createElement("button");
+  close.className = "button";
+  close.textContent = "Close summary";
+  close.addEventListener("click", () => panel.remove());
+  panel.append(close);
 }
 
 // ---- text extraction -------------------------------------------------------
@@ -172,7 +242,8 @@ async function distillSelection() {
   if (!captured) return;
   let reply;
   try {
-    reply = await chrome.runtime.sendNativeMessage(HOST, { text: captured.text });
+    const { plain, glossary } = await chrome.storage.sync.get({ plain: false, glossary: true });
+    reply = await chrome.runtime.sendNativeMessage(HOST, { text: captured.text, plain, glossary });
   } catch (e) {
     reply = { ok: false, error: `can't reach the distill helper (${e.message}). Run install.sh.` };
   }

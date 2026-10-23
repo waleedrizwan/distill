@@ -423,10 +423,22 @@ distill trailed plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
 
 ## Milestone 12: browser extension and URLs
 
-- [ ] Extension: a settings toggle for plain mode and glossary; the glossary is
-  shown under the distilled text; the PDF reader gets "Summarize whole paper"
-  (section by section). The native host passes the new options through.
-  Checked in Chrome on one arXiv PDF and one news page.
+- [x] Extension: an options page with **Plain mode** and **Glossary**
+  (`chrome.storage.sync`); the glossary is shown under distilled text (inside
+  the distilled span, so undo and click-to-compare still restore the
+  original exactly); the PDF reader gets **Summarize paper**, which sends the
+  PDF bytes (base64) so distill's own PDF reader is used, and shows
+  `--by-section=2` with headings and the glossary. The native host passes
+  `plain`, `glossary`, `by_section` and `pdf` through and returns the
+  glossary as data. Checked in Chrome on a harness page that loads the
+  extension's own `content.js` and `reader.js` with `chrome.*` stubbed and
+  native messages relayed to the real `distill-host`: a test article
+  (glossary shown, Cmd+Z restores the original) and an arXiv PDF (whole-paper
+  summary). The installed extension's service worker and context menus were
+  not driven (the browser tool cannot open `chrome-extension://` pages);
+  reload the unpacked extension to pick up the change. Found along the way:
+  appendix-letter headings matched axis labels ("R Rmax"); letters are now
+  A to J.
 - [x] `distill https://...`, opt-in by the argument (`ureq`, 60 s timeout,
   64 MB limit). PDFs go through Milestone 7; HTML (also local `.html`
   files) through `src/html.rs`: article or main content, scripts, styles,
