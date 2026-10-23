@@ -366,19 +366,28 @@ distill trailed plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
 
 ## Milestone 10: jargon glossary (`--glossary`)
 
-- [ ] **From the document.** Find definitions the source gives: acronyms
-  ("log-likelihood ratio (LLR)", "LLR (log-likelihood ratio)"), "X is defined
-  as", "we call X", "X refers to", "X, i.e. ...", and "X, a ...". When the
-  summary uses a term whose definition it does not contain, a glossary under
-  the summary gives the definition verbatim. `--expand-acronyms` instead writes
-  the first use as "log-likelihood ratio (LLR)", using only the source's words.
+- [x] **From the document: abbreviations** (`src/glossary.rs`). "long form
+  (SF)" and "SF (long form)", by initials first, then a stricter Schwartz and
+  Hearst letter match. `--glossary` lists the abbreviations a summary uses
+  without spelling out; `--expand-acronyms` spells out the first use in place;
+  `--json` carries a `glossary` field. Precision in three readings of 100
+  definitions from the 60 papers: 89%, then 98% and 100% after the rules were
+  tightened (cited names such as "Cicchetti, 1994", the rarer SF-first order
+  only on exact initials, no brackets or commas in a definition, capitals
+  matching capitals or word starts). In use: 33 of the 60 paper summaries get
+  a glossary, 51 entries, all 27 test-paper entries correct.
+- [ ] **From the document: other definitions** ("X is defined as", "we call
+  X", "X refers to", "X, i.e. ..."). Not started.
 - [ ] **From a bundled dictionary.** For hard words the document never defines
   (rare by a frequency list, not a name), give a short gloss from Open English
   WordNet (CC BY 4.0, attributed). The sense is chosen by embedding similarity
   between the sentence and each sense's gloss, and nothing is shown when no
   sense clearly wins. Dictionary entries are labelled as such.
-- [ ] Property test: every glossary entry from the document is a verbatim span
-  of it.
+- [x] Property tests and a `glossary` fuzz target: every definition and short
+  form is the document's own text (whitespace collapsed, as distill holds
+  sentences), and expanding only inserts definitions in front of short forms.
+  Fuzzing found two real faults (a definition running into a bracket in the
+  SF-first order; the span contract stated without the whitespace caveat).
 - [ ] **Gate (hand-read on the papers set):** at least 90% of document
   definitions correct, and at least 80% of dictionary entries with the right
   sense. If the dictionary part misses its gate, only the document part ships.

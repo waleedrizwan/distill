@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d967fdaa2da7cd6648c9f73a55d554205e8934b94ecf7efc7978ce38725e7601 # shrinks to s = "The MM (maa mma) was used."

@@ -4,6 +4,7 @@
 
 pub mod compress;
 pub mod embed;
+pub mod glossary;
 pub mod lexical;
 pub mod pdf;
 pub mod salience;

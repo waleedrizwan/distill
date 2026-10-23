@@ -56,3 +56,10 @@ path = "fuzz_targets/pdf_layout.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "glossary"
+path = "fuzz_targets/glossary.rs"
+test = false
+doc = false
+bench = false
