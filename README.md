@@ -49,6 +49,9 @@ distill [FILE]            summarize FILE (or stdin)
                           halves are full clauses
       --simplify          swap hard words for simpler ones from a reviewed table
                           ("numerous" -> "many"), only where meaning barely moves
+      --glossary          list the abbreviations the summary uses without spelling
+                          out, with the document's own definitions
+      --expand-acronyms   write the first such use as "log-likelihood ratio (LLR)"
       --no-repair         don't add context sentences
       --no-headings       don't print section headings
       --dehyphenate       rejoin words broken across lines (text already extracted from a PDF)
@@ -304,6 +307,27 @@ precise but rare: across the development and test summaries it split 7 of
 about 260 long news sentences, all correctly, and nothing in bills or papers.
 The limit is not the clause detector: few long summary sentences contain such
 a junction at all. ROUGE is unchanged.
+
+`--glossary` (`src/glossary.rs`) finds the definitions a document gives for
+its abbreviations, "log-likelihood ratio (LLR)" and "LLR (log-likelihood
+ratio)", and lists after the summary the ones it uses without spelling out:
+
+```
+Glossary
+  LoRA: low-rank adaptation
+  DoRA: Weight-decomposed LoRAs
+```
+
+The words are the document's own. A definition is accepted when the short
+form's letters are the initials of the words before the bracket (hyphenated
+parts count), or failing that when they appear in order in at most a few
+words, a capital matching a capital or the start of a word (Schwartz and
+Hearst's method, made stricter). In three readings of 100 definitions found
+in the 60 papers, precision went from 89% to 98% to 100% as the rules were
+tightened; in the summaries, about half get a glossary (33 of 60, 51
+entries), and every entry checked in the test papers' summaries was right.
+`--expand-acronyms` instead spells out the first use inside the sentence,
+which inserts the document's words into it.
 
 The salience weights are trained by `python3 eval/train_salience.py` on 3,000
 CNN/DailyMail and 1,500 BillSum training documents, none of which overlap the

@@ -1,4 +1,4 @@
-use distill::{compress, embed, lexical, pdf, salience, segment, select, split};
+use distill::{compress, embed, glossary, lexical, pdf, salience, segment, select, split};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -106,6 +106,20 @@ struct Args {
     #[arg(long)]
     split: bool,
 
+    /// After the summary, list the abbreviations it uses without spelling
+    /// out, with the document's own definition ("LLR: log-likelihood ratio")
+    #[arg(long)]
+    glossary: bool,
+
+    /// Spell out the first use of each abbreviation the summary leaves
+    /// undefined, with the document's words: "log-likelihood ratio (LLR)"
+    #[arg(long)]
+    expand_acronyms: bool,
+
+    /// Print every abbreviation definition found in the document and exit
+    #[arg(long, hide = true)]
+    dump_abbreviations: bool,
+
     /// --simplify: least cosine similarity to the original sentence a swap may leave
     #[arg(long, default_value_t = 0.95)]
     simplify_threshold: f32,
@@ -171,6 +185,16 @@ struct JsonOut<'a> {
     summary_words: usize,
     source_words: usize,
     sentences: Vec<JsonSentence<'a>>,
+    /// With --glossary: abbreviations the summary uses without defining.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    glossary: Vec<JsonGloss<'a>>,
+}
+
+#[derive(Serialize)]
+struct JsonGloss<'a> {
+    term: &'a str,
+    definition: &'a str,
+    source: &'static str,
 }
 
 fn main() -> std::process::ExitCode {
@@ -210,6 +234,14 @@ fn run() -> Result<()> {
         &raw,
         &segment::ParseOptions { min_words: args.min_words, dehyphenate: args.dehyphenate },
     );
+
+    let abbreviations = glossary::abbreviations(&doc.sentences.iter().map(|s| s.text.as_str()).collect::<Vec<_>>());
+    if args.dump_abbreviations {
+        for a in &abbreviations {
+            println!("{}\t{}", a.short, a.long);
+        }
+        return Ok(());
+    }
 
     if args.show_segments {
         for (si, sec) in doc.sections.iter().enumerate() {
@@ -410,7 +442,22 @@ fn run() -> Result<()> {
             }
         }
     }
+    if args.expand_acronyms {
+        let order: Vec<usize> = picks.iter().map(|p| p.index).collect();
+        let texts: Vec<String> =
+            order.iter().map(|&i| display[i].clone().unwrap_or_else(|| doc.sentences[i].text.clone())).collect();
+        for (&i, new) in order.iter().zip(glossary::expand(&texts, &abbreviations)) {
+            if new != doc.sentences[i].text && display[i].as_deref() != Some(new.as_str()) {
+                display[i] = Some(new);
+            }
+        }
+    }
     let shown = |i: usize| -> &str { display[i].as_deref().unwrap_or(&doc.sentences[i].text) };
+    let needed: Vec<&glossary::Abbreviation> = if args.glossary {
+        glossary::for_summary(&picks.iter().map(|p| shown(p.index)).collect::<Vec<_>>(), &abbreviations)
+    } else {
+        Vec::new()
+    };
     let t4 = Instant::now();
 
     let source_words: usize = doc.sentences.iter().map(|s| s.words).sum();
@@ -444,10 +491,20 @@ fn run() -> Result<()> {
                     }
                 })
                 .collect(),
+            glossary: needed
+                .iter()
+                .map(|a| JsonGloss { term: &a.short, definition: &a.long, source: "document" })
+                .collect(),
         };
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
         print_text(&doc, &selection, !args.no_headings, &shown);
+        if !needed.is_empty() {
+            println!("\nGlossary");
+            for a in &needed {
+                println!("  {}: {}", a.short, a.long);
+            }
+        }
     }
 
     if args.verbose {
