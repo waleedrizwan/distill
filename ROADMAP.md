@@ -288,15 +288,37 @@ judge PDF handling, structure or jargon.
 
 ## Milestone 8: paper structure
 
-- [ ] Recognise the title block (authors, affiliations, emails), abstract,
-  section headings, references, acknowledgements, figure and table captions,
-  and equation or symbol-heavy lines. Only prose becomes a candidate. The
-  abstract stays a candidate in normal use and is removed in the eval.
+- [x] **Non-prose is not a candidate** (`src/segment.rs`, `src/pdf.rs`): a
+  paragraph in smaller type than the body (captions, figure text, tables;
+  not the abstract or small-capital headings) is dropped from PDFs; a
+  sentence whose tokens are mostly not plain words (pseudocode, formulas),
+  a caption with a lettered label ("Figure B.1:", "Fig. S3."), or a sentence
+  starting in lower case (unless the whole text is lowercased) is not a
+  candidate. Found along the way: two-column pages with a gutter narrower
+  than 1.5 em (common on A4) were read across the columns; a narrower gap
+  that covers the page's middle now splits too.
+- Result. ROUGE-2 at reference length: papers test +0.66 (95% CI -0.25 to
+  +1.63), papers-dev +0.37 (-0.38 to +1.17), both papers pooled +0.52
+  (-0.08 to +1.11), the old arXiv set +1.11 (+0.08 to +2.52, significant);
+  news, bills and reports unchanged (within 0.01). **Read-through** of
+  every sentence that changed in the 30 development summaries: of 202
+  sentences that left, about 140 were fragments, captions, pseudocode,
+  reference entries or garbled text; of 172 that came in, about 50 were.
+  About 90 fewer junk sentences in about 300. Kept for that.
+- Tried and dropped: skipping everything after the reference list
+  (appendices are 21% of candidate sentences): papers-dev -0.21, significant
+  (they support the centrality of the main text); requiring a sentence to
+  end with a full stop: as much junk came in as went out, and it dropped a
+  web article's headline.
+- Still junk: lines cut off by a display equation that happen to end the
+  paragraph ("... can be calculated as"), table rows, reference entries in
+  journals' own styles, figure text whose words run together.
 - [ ] `--by-section`: a short summary under each top-level heading, for
   reading a paper section by section.
-- [ ] **Gate:** papers ROUGE-2 up significantly at reference length, no
-  significant drop on any other development set, and goldens updated only with
-  an explanation.
+- [ ] Bold run-in paragraph headings ("Prefix Tuning Prefix Tuning, as
+  introduced in ...") split off.
+- [ ] **Gate:** papers ROUGE-2 up significantly at reference length. Not
+  met yet (+0.52 pooled, not significant).
 
 ## Milestone 9: long-document ranking
 
