@@ -1,0 +1,8 @@
+src/lexicon.tsv is derived from SimplePPDB by Ellie Pavlick and Chris
+Callison-Burch ("Simple PPDB: A Paraphrase Database for Simplification", ACL
+2016), licensed under Creative Commons Attribution 3.0 United States
+(https://creativecommons.org/licenses/by/3.0/us/).
+It has been modified: filtered by eval/build_lexicon.py and reviewed by hand.
+The original download link is dead; the build uses the Internet Archive's
+capture of https://www.seas.upenn.edu/~nlp/resources/simple-ppdb.tgz,
+whose checksum is recorded in the script.
