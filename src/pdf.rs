@@ -83,7 +83,7 @@ pub fn read_lines(bytes: &[u8]) -> Result<(Vec<Page>, Vec<Line>)> {
                 for i in 1..=words.len() {
                     let split = i == words.len() || {
                         let (a, b) = (words[i - 1], words[i]);
-                        b.bbox.x - (a.bbox.x + a.bbox.width) > (a.avg_font_size * 1.5).max(9.0)
+                        column_gap(a.bbox.x + a.bbox.width, b.bbox.x, a.avg_font_size, (x0 + x1) / 2.0)
                     };
                     if !split {
                         continue;
@@ -121,6 +121,14 @@ pub fn read_lines(bytes: &[u8]) -> Result<(Vec<Page>, Vec<Line>)> {
         Ok(res) => res,
         Err(_) => Err(anyhow!("the PDF could not be parsed (the parser crashed on it)")),
     }
+}
+
+/// Whether the space between two words on one baseline is the gap between
+/// columns: far wider than a word space, or a narrower gap (A4 papers often
+/// leave about 1.4 em) that covers the page's middle.
+fn column_gap(left: f32, right: f32, size: f32, mid: f32) -> bool {
+    let gap = right - left;
+    gap > (size * 1.5).max(9.0) || (gap > size * 0.7 && left < mid && right > mid)
 }
 
 /// A run of text in one font, as the library reports it ("word").
@@ -224,10 +232,43 @@ pub fn assemble(pages: &[Page], lines: Vec<Line>) -> String {
     for (p, page_lines) in by_page.into_iter().enumerate() {
         ordered.extend(reading_order(pages[p], page_lines));
     }
-    let paragraphs = paragraphs(&ordered);
+    let paragraphs = drop_small_print(&ordered, paragraph_groups(&ordered));
     let joined = dehyphenate(&paragraphs);
     let mut out = joined.join("\n\n");
     out.push('\n');
+    out
+}
+
+/// Paragraphs set smaller than the body text: figure and table captions, text
+/// inside figures, tables. The abstract, which papers often set small too,
+/// is kept: the paragraphs after an "Abstract" heading, and one that opens
+/// with the word.
+fn drop_small_print(lines: &[Line], groups: Vec<Vec<usize>>) -> Vec<Vec<String>> {
+    let body = body_size(lines);
+    let mut out = Vec::with_capacity(groups.len());
+    let mut in_abstract = false;
+    for g in groups {
+        let chars: usize = g.iter().map(|&i| lines[i].text.len()).sum::<usize>().max(1);
+        let size = g.iter().map(|&i| lines[i].size * lines[i].text.len() as f32).sum::<f32>() / chars as f32;
+        let text: Vec<String> = g.iter().map(|&i| lines[i].text.clone()).collect();
+        let first = text[0].trim();
+        let abstract_heading = text.len() == 1 && first.trim_end_matches([':', '.']).eq_ignore_ascii_case("abstract");
+        // The first paragraph in the body's size ends the abstract.
+        if !abstract_heading && size >= body * 0.92 {
+            in_abstract = false;
+        }
+        let abstract_text = in_abstract || first.to_lowercase().starts_with("abstract");
+        if abstract_heading {
+            in_abstract = true;
+        }
+        // Headings set in small capitals measure small too; keep one-line,
+        // heading-shaped paragraphs.
+        let heading = text.len() == 1 && first.split(' ').count() <= 12 && !first.ends_with(['.', ',', ';']);
+        if size < body * 0.92 && !abstract_text && !abstract_heading && !heading {
+            continue;
+        }
+        out.push(text);
+    }
     out
 }
 
@@ -333,7 +374,13 @@ fn reading_order(page: Page, mut lines: Vec<Line>) -> Vec<Line> {
 }
 
 /// Join lines into paragraphs.
+#[cfg(test)]
 fn paragraphs(lines: &[Line]) -> Vec<Vec<String>> {
+    paragraph_groups(lines).into_iter().map(|g| g.into_iter().map(|i| lines[i].text.clone()).collect()).collect()
+}
+
+/// Paragraphs as runs of line indices.
+fn paragraph_groups(lines: &[Line]) -> Vec<Vec<usize>> {
     // The usual distance from one line to the next, from lines in the same
     // column and font size.
     let mut steps: Vec<f32> = lines
@@ -365,8 +412,8 @@ fn paragraphs(lines: &[Line]) -> Vec<Vec<String>> {
         })
         .collect();
 
-    let mut out: Vec<Vec<String>> = Vec::new();
-    let mut current: Vec<String> = Vec::new();
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
     for (i, l) in lines.iter().enumerate() {
         let brk = match i.checked_sub(1).map(|j| &lines[j]) {
             None => false,
@@ -390,7 +437,7 @@ fn paragraphs(lines: &[Line]) -> Vec<Vec<String>> {
         if brk && !current.is_empty() {
             out.push(std::mem::take(&mut current));
         }
-        current.push(l.text.clone());
+        current.push(i);
     }
     if !current.is_empty() {
         out.push(current);
@@ -496,6 +543,17 @@ mod tests {
     }
 
     #[test]
+    fn narrow_gutters_split() {
+        // "with-" | "significant" on an A4 page (middle 297.6): a 15 pt gap at 10.9 pt.
+        assert!(column_gap(290.9, 306.1, 10.9, 297.6));
+        // An ordinary word space does not split, nor a wide space away from the middle.
+        assert!(!column_gap(160.9, 163.6, 10.9, 297.6));
+        assert!(!column_gap(150.0, 162.0, 10.9, 297.6));
+        // A very wide gap splits anywhere (tables, a right-aligned date).
+        assert!(column_gap(150.0, 180.0, 10.9, 297.6));
+    }
+
+    #[test]
     fn two_columns_read_left_then_right() {
         let mut lines = Vec::new();
         for i in 0..10 {
@@ -579,6 +637,31 @@ mod tests {
         let p = paragraphs(&lines);
         assert_eq!(p.len(), 3, "{p:?}");
         assert_eq!(p[1], ["Introduction"]);
+    }
+
+    #[test]
+    fn small_print_dropped_but_not_the_abstract() {
+        let mut lines = Vec::new();
+        let mut y = 760.0;
+        let mut push = |text: &str, size: f32, lines: &mut Vec<Line>| {
+            let mut l = line(0, 72.0, y, 450.0, text);
+            l.size = size;
+            l.h = size;
+            lines.push(l);
+            y -= 30.0;
+        };
+        push("Abstract", 9.0, &mut lines);
+        push("We study things in a small font, as two-column papers do.", 9.0, &mut lines);
+        push("1 Introduction", 10.0, &mut lines);
+        for _ in 0..6 {
+            push("Body text set in the normal size of the paper runs on here.", 10.0, &mut lines);
+        }
+        push("Figure 1: A caption set smaller than the body text.", 8.0, &mut lines);
+        let groups = paragraph_groups(&lines);
+        let kept: Vec<String> = drop_small_print(&lines, groups).into_iter().map(|p| p.join(" ")).collect();
+        assert!(kept.iter().any(|p| p.contains("We study things")), "{kept:?}");
+        assert!(!kept.iter().any(|p| p.starts_with("Figure 1")), "{kept:?}");
+        assert_eq!(kept.join(" ").matches("Body text").count(), 6);
     }
 
     #[test]

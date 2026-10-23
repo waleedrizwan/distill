@@ -95,7 +95,7 @@ re!(
 );
 re!(
     re_caption,
-    r"^(?:Figure|Fig\.|Table|Tab\.|Source|Sources|Photo|Image|Credit|Chart|Exhibit|Listing|Algorithm|Copyright|\u{00A9})\s*[\dIVX.\-]*\s*[:.|]"
+    r"^(?:(?:Supplementary|Extended Data)\s+)?(?:Figure|Fig\.|Table|Tab\.|Source|Sources|Photo|Image|Credit|Chart|Exhibit|Listing|Algorithm|Copyright|\u{00A9})\s*[A-Z]?[\dIVX.\-]*\s*[:.|]"
 );
 re!(re_bib_entry, r"^\[\d{1,3}\]\s");
 // Web page furniture: consent banners, link labels, social and newsletter
@@ -189,6 +189,14 @@ pub fn parse(raw: &str, opts: &ParseOptions) -> Document {
     flush(&mut current, &mut blocks);
 
     let mut b = Builder::new(opts.clone());
+    // Text that is lowercased throughout (some datasets are) has no capitals
+    // to tell a sentence from a fragment, so that check is off for it.
+    let starts: Vec<bool> = blocks
+        .iter()
+        .filter(|bl| bl.iter().map(|l| word_count(l)).sum::<usize>() >= 6)
+        .filter_map(|bl| bl[0].chars().find(|c| c.is_alphabetic()).map(char::is_lowercase))
+        .collect();
+    b.check_fragments = starts.iter().filter(|&&lower| lower).count() * 2 <= starts.len();
     let n = blocks.len();
     let mut i = 0;
     while i < n {
@@ -408,6 +416,8 @@ struct Builder {
     /// Most recent sentence that ends by introducing a list ("...:" or "...--").
     pending_lead: Option<usize>,
     list_stack: Vec<ListLevel>,
+    /// Treat sentences starting in lower case as fragments.
+    check_fragments: bool,
 }
 
 /// A lead-in plus its items is kept as one unit when it is no longer than this.
@@ -422,6 +432,7 @@ impl Builder {
             paragraph: 0,
             pending_lead: None,
             list_stack: Vec::new(),
+            check_fragments: true,
         }
     }
 
@@ -490,7 +501,10 @@ impl Builder {
             for (k, s) in split_sentences(&text).into_iter().enumerate() {
                 let index = self.sentences.len();
                 let words = word_count(&s);
-                let candidate = self.is_candidate(&s, words);
+                // A list item may start in lower case ("(a) in general, ...");
+                // other text that does is a piece of a sentence.
+                let candidate =
+                    self.is_candidate(&s, words) && (is_item || !self.check_fragments || starts_like_sentence(&s));
                 self.pending_lead = if ends_with_lead_in(&s) { Some(index) } else { None };
                 self.sentences.push(Sentence {
                     index,
@@ -529,7 +543,7 @@ impl Builder {
             .split_whitespace()
             .filter(|w| w.chars().any(|c| c.is_lowercase()))
             .count();
-        lower_words >= 3
+        lower_words >= 3 && !is_non_prose(t)
     }
 
     /// Fold short lists into the sentence that introduces them, so
@@ -643,6 +657,49 @@ fn ends_with_lead_in(s: &str) -> bool {
 fn is_menu(t: &str) -> bool {
     let items: Vec<&str> = t.split(['|', '\u{2022}', '\u{00B7}']).map(str::trim).filter(|x| !x.is_empty()).collect();
     items.len() >= 3 && items.iter().map(|x| word_count(x)).sum::<usize>() <= 4 * items.len()
+}
+
+/// A sentence starts with a capital, a digit or an opening quote or bracket.
+/// One that starts in lower case is a piece of a sentence: the rest of a line
+/// a PDF column break cut, or the "where N is ..." after a display equation.
+/// Words with a capital inside ("iPhone", "mRNA") are allowed.
+fn starts_like_sentence(t: &str) -> bool {
+    let first = t.split_whitespace().next().unwrap_or("");
+    // Labels and quotations: "(e) Effective Date.--", "``subchapter c''".
+    if first.starts_with(|c: char| is_opener(c) || c == '`') {
+        return true;
+    }
+    match first.chars().find(|c| c.is_alphanumeric()) {
+        Some(c) if c.is_lowercase() => first.chars().any(char::is_uppercase),
+        _ => true,
+    }
+}
+
+/// Pseudocode and formulas ("Conv_hist ← [] ▷ Stage 2: p ← RandomSample(Po)"):
+/// most tokens are not plain words. (Figure text whose words run together,
+/// "studentsthese 22 becausestudents45", still passes: that needs a
+/// dictionary.) A plain word is letters (with inner hyphens or
+/// apostrophes) or a number, wrapped in ordinary punctuation.
+fn is_non_prose(t: &str) -> bool {
+    let tokens: Vec<&str> = t.split_whitespace().collect();
+    if tokens.len() < 6 {
+        return false;
+    }
+    let wrap = |c: char| "([{\"'\u{201C}\u{2018})]}.,;:!?\u{201D}\u{2019}".contains(c);
+    let plain = tokens
+        .iter()
+        .filter(|w| {
+            let core = w.trim_matches(wrap);
+            match core.chars().next() {
+                Some(c) if c.is_alphabetic() => {
+                    core.chars().count() <= 24 && core.chars().all(|c| c.is_alphabetic() || "-'\u{2019}".contains(c))
+                }
+                Some(c) if c.is_ascii_digit() => core.chars().all(|c| c.is_ascii_digit() || ".,%".contains(c)),
+                _ => false,
+            }
+        })
+        .count();
+    plain * 2 < tokens.len()
 }
 
 fn is_skip_title(title: &str) -> bool {
@@ -1084,6 +1141,56 @@ mod tests {
         assert_eq!(doc.sections[2].level, 2);
         assert!(doc.sections[3].skip);
         assert!(doc.sentences.iter().filter(|s| s.section == 3).all(|s| !s.candidate));
+    }
+
+    #[test]
+    fn non_prose_is_not_a_candidate() {
+        for junk in [
+            "Conv_hist ← [] ▷ Stage 2: p ← RandomSample(Po) Utterances ←",
+            "xki1 xkj1 = xki₁ xkk1j − xkj xkk1i + Σ wij for the window statistic",
+        ] {
+            assert!(is_non_prose(junk), "{junk}");
+        }
+        for prose in [
+            "The 2024 survey of about 80,000 laypeople has indices of time and risk preferences.",
+            "Cobalt films (flat and wedged) were grown by MBE at 1.5 nm per minute, 30% faster.",
+            "Short one.",
+        ] {
+            assert!(!is_non_prose(prose), "{prose}");
+        }
+    }
+
+    #[test]
+    fn fragments_starting_in_lower_case() {
+        assert!(!starts_like_sentence("than focusing on single spectral lines."));
+        assert!(!starts_like_sentence("where N is the number of wavelength points."));
+        assert!(starts_like_sentence("The planets remain in resonance."));
+        assert!(starts_like_sentence("iPhone sales rose in the quarter."));
+        assert!(starts_like_sentence("mRNA vaccines were tested."));
+        assert!(starts_like_sentence("(e) Effective Date.--The amendments apply after 2018."));
+        assert!(starts_like_sentence("``subchapter c. tax on trading transactions''."));
+        assert!(starts_like_sentence("3D printing is common."));
+        let doc = parse(
+            "The model is defined by the equation below.\n\nwhere N is the number of points in the full sample here.\n\nThe next sentence of the paper is about something else.",
+            &ParseOptions::default(),
+        );
+        let c: Vec<&str> = doc.sentences.iter().filter(|s| s.candidate).map(|s| s.text.as_str()).collect();
+        assert_eq!(c.len(), 2, "{c:?}");
+        // Lowercased throughout: nothing to go by, so nothing is dropped.
+        let doc = parse(
+            "the model is defined by the equation below and more words.\n\nwhere n is the number of points in the full sample here.\n\nthe next sentence of the paper is about something else.",
+            &ParseOptions::default(),
+        );
+        assert_eq!(doc.sentences.iter().filter(|s| s.candidate).count(), 3);
+    }
+
+    #[test]
+    fn caption_labels_with_letters() {
+        for cap in ["Figure B.1: Bank lending standards", "Table B.5: Price effects", "Fig. S3. The setup",
+            "Extended Data Figure 2 | Contrast sensitivity", "Supplementary Table 1: Samples"] {
+            assert!(re_caption().is_match(cap), "{cap}");
+        }
+        assert!(!re_caption().is_match("Figures of speech are common in law."));
     }
 
     #[test]

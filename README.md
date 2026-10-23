@@ -97,7 +97,9 @@ the default stays the smallest and fastest. Times are for the 1,662-word bill in
    changes are rejoined ("BARE-generated", "Fe3O4"), citation numbers set
    small after a word are dropped, and a word hyphenated at a line end is
    rejoined unless the document writes it hyphenated elsewhere or both halves
-   are words it uses alone ("resource-constrained").
+   are words it uses alone ("resource-constrained"). Paragraphs set smaller
+   than the body text (captions, text inside figures, tables) are dropped,
+   except the abstract and small-capital headings.
 1. **Segment** (`src/segment.rs`). Detects headings (Markdown, numbered,
    ALL CAPS, `SEC. 2. TITLE.`, `12. Governing Law.`), paragraphs, lists and
    sentences. The sentence splitter is rule-based with abbreviation handling
@@ -105,7 +107,11 @@ the default stays the smallest and fastest. Times are for the 1,662-word bill in
    `Smith v. Jones`). A short list is folded into the sentence that introduces
    it, so "X means-- (A) ..., (B) ..., and (C) ..." stays one unit.
    A quotation of up to 60 words stays one sentence even when it contains
-   full stops, so a quoted statement is not cut in half.
+   full stops, so a quoted statement is not cut in half. Pieces that are not
+   sentences are kept as context but never picked: captions ("Figure B.1:"),
+   pseudocode and formulas (most tokens not plain words), and, unless the
+   whole text is lowercased, text that starts in lower case (the rest of a
+   sentence a PDF column break or a display equation cut off).
 2. **Embed** (`src/embed.rs`). Each candidate sentence becomes a 384-dimension
    vector.
 3. **Rank** (`src/select.rs`). A sentence scores highly when the rest of the
@@ -182,23 +188,23 @@ the context sentences distill adds for readability count against the budget.
 |  |  | centroid | 41.1 | 16.2 | 24.5 | 164 | 17.0 | 4.7 |
 |  |  | distill | **43.6** | **20.6** | **28.2** | **162** | **14.7** | **4.2** |
 | arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 | 16.5 | 16.4 |
-|  |  | centroid | 28.8 | 8.8 | 15.9 | 326 | 21.3 | 20.2 |
-|  |  | distill | **33.8** | **11.6** | **19.1** | **272** | **19.1** | **20.6** |
+|  |  | centroid | 29.7 | 9.3 | 16.7 | 309 | 21.0 | 19.9 |
+|  |  | distill | **34.0** | **12.0** | **19.2** | **272** | **19.4** | **20.3** |
 |  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 | 12.8 | 17.2 |
-|  |  | centroid | 36.0 | 10.9 | 21.5 | 140 | 15.8 | 20.0 |
-|  |  | distill | **36.2** | **12.6** | **20.8** | **139** | **15.3** | **21.6** |
+|  |  | centroid | 35.8 | 10.4 | 21.1 | 141 | 15.8 | 19.5 |
+|  |  | distill | **38.5** | **13.7** | **21.8** | **140** | **14.9** | **21.9** |
 | govreport (n=30) | 20 sentences | lead | 44.6 | 13.2 | 17.9 | 530 | 17.2 | 6.2 |
 |  |  | centroid | 54.0 | 22.5 | 21.6 | 725 | 21.2 | 6.8 |
 |  |  | distill | **55.0** | **22.7** | **22.3** | **686** | **20.3** | **6.7** |
 |  | ref length (599 w) | lead | 46.3 | 13.7 | 18.0 | 598 | 16.6 | 6.3 |
 |  |  | centroid | 56.4 | 22.5 | 21.8 | 596 | 20.8 | 6.8 |
 |  |  | distill | **56.6** | **22.5** | **22.7** | **596** | **19.9** | **6.7** |
-| papers (n=30) | 8 sentences | lead | 34.7 | 10.6 | 17.9 | 200 | 17.2 | 14.2 |
-|  |  | centroid | 36.2 | 8.6 | 16.5 | 243 | 18.1 | 16.1 |
-|  |  | distill | **36.9** | **9.6** | **16.7** | **225** | **17.1** | **16.4** |
-|  | ref length (194 w) | lead | 35.5 | 10.4 | 17.4 | 194 | 14.4 | 14.1 |
-|  |  | centroid | 36.0 | 8.0 | 16.5 | 192 | 12.0 | 16.3 |
-|  |  | distill | **36.8** | **9.1** | **16.8** | **192** | **12.1** | **16.3** |
+| papers (n=30) | 8 sentences | lead | 34.5 | 10.5 | 18.0 | 200 | 17.2 | 14.2 |
+|  |  | centroid | 38.0 | 9.8 | 17.1 | 237 | 18.1 | 15.5 |
+|  |  | distill | **38.6** | **10.4** | **17.3** | **218** | **16.8** | **15.2** |
+|  | ref length (194 w) | lead | 35.5 | 10.7 | 17.6 | 194 | 14.3 | 14.3 |
+|  |  | centroid | 37.6 | 8.8 | 17.0 | 192 | 12.9 | 15.4 |
+|  |  | distill | **38.0** | **9.8** | **17.2** | **192** | **12.8** | **15.3** |
 
 What this shows:
 
@@ -221,15 +227,13 @@ What this shows:
   paragraphs, so section budgets have nothing to work with.
 - **Research papers: ahead of centroid, behind the first sentences.** On the
   30 test papers at equal length the first sentences of the introduction
-  score best (10.4 ROUGE-2, against 9.1 for distill and 8.0 for centroid); on
-  the 30 development papers distill is ahead (9.2, against 8.9 and 7.2).
-  distill's picks are the plainest of the three (Flesch-Kincaid grade 12.1,
-  against 14.4 for the first sentences).
-- **The old arXiv set got worse at six sentences.** The 10 lowercased arXiv
-  papers drop from 14.3 to 11.6 ROUGE-2 at six sentences (significant),
-  though not at equal length (13.5 to 12.6, not significant). This is the
-  price of the length-dependent defaults, which the 60 PDF papers and the 130
-  reports favour.
+  score best (10.7 ROUGE-2, against 9.8 for distill and 8.8 for centroid); on
+  the 30 development papers centroid and distill are close (9.7 and 9.5)
+  and the first sentences far behind (7.3). distill's picks are plainer than
+  the first sentences (Flesch-Kincaid grade 12.8 against 14.4).
+- **The old arXiv set** (10 lowercased papers) lost 2.7 ROUGE-2 at six
+  sentences to the length-dependent defaults (below), and is now at 13.7 at
+  equal length, ahead of both baselines.
 - **The learned salience score** is where most of the gain comes from. Against
   the same pipeline without it, ROUGE-2 at equal length rose by 1.9 points on
   the bills and 2.2 on the papers (both significant) and 0.4 on news (not
