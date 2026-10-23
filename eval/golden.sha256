@@ -6,6 +6,8 @@ fbe60c1b88cff474c2c819cf11636d3c19902cdbec1348a6847d7fddb7f74107  samples/apache
 fbe60c1b88cff474c2c819cf11636d3c19902cdbec1348a6847d7fddb7f74107  samples/apache-license.txt --compress --words 150
 fbe60c1b88cff474c2c819cf11636d3c19902cdbec1348a6847d7fddb7f74107  samples/apache-license.txt --simplify --compress --words 150
 fbe60c1b88cff474c2c819cf11636d3c19902cdbec1348a6847d7fddb7f74107  samples/apache-license.txt --split --compress --simplify --words 150
+322109c803e1e1cc3af8549d9c199c99a4cd082553a1888325edb8dd4f8fd5e9  samples/apache-license.txt --plain --words 150
+47d5fe2c0c93e6ce7e7df206607ad716a5a6484afa6233a05bd4588a945733ff  samples/apache-license.txt --glossary --by-section
 3c66cb2e25887d91634ca095a1eb987c16af8f1dacc46108ba2a7041121b5ffe  samples/us-bill.txt (defaults)
 3bbe9a835aa70efcdb900f23664d2ab94f6b77bcf365679d58d428bd6dc2f735  samples/us-bill.txt -n 3
 11c2ae74b2a71ffc09ea443b97b48b5f7b12e89db6d13ff1121a3b05e00bd6ac  samples/us-bill.txt --words 150
@@ -14,6 +16,8 @@ bded54d7890795b0fa450ccbf7b4c82b5317d5094a08bb1d32b84dd248f66a8a  samples/us-bil
 11c2ae74b2a71ffc09ea443b97b48b5f7b12e89db6d13ff1121a3b05e00bd6ac  samples/us-bill.txt --compress --words 150
 11c2ae74b2a71ffc09ea443b97b48b5f7b12e89db6d13ff1121a3b05e00bd6ac  samples/us-bill.txt --simplify --compress --words 150
 11c2ae74b2a71ffc09ea443b97b48b5f7b12e89db6d13ff1121a3b05e00bd6ac  samples/us-bill.txt --split --compress --simplify --words 150
+4b601f92c95f96701d63e1303c3caca82fbb138111ba8368c3988c1cbb0ff0f7  samples/us-bill.txt --plain --words 150
+0c217ff2c7d805e4d52177a74ba86720d395f36ae02375950877863b3683d757  samples/us-bill.txt --glossary --by-section
 05d02aeef1fc44de85b6d7274549df78c7448fd52ff1256a6c4e033430dee6ba  samples/web-article.txt (defaults)
 05d02aeef1fc44de85b6d7274549df78c7448fd52ff1256a6c4e033430dee6ba  samples/web-article.txt -n 3
 5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --words 150
@@ -22,6 +26,8 @@ a77d2341c38f887634fb4e7b256d218be88df16697700726bd200fd8958e5131  samples/web-ar
 5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --compress --words 150
 5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --simplify --compress --words 150
 129fd01814d3a1bf8918b8ddea0a53f8a16a52485b889a41b85ef9faf574558b  samples/web-article.txt --split --compress --simplify --words 150
+715363ab5ad964f5f182f81c69f5a72c90c20e89eab119b2b85ade1cee82766a  samples/web-article.txt --plain --words 150
+7cb2c83ca3fc9848b9ea634a1758a3365a7d152414832e8bd6efe857dc89cab8  samples/web-article.txt --glossary --by-section
 2b455a551c6d54d60f30a067137b67751cc472d79cd7ef0855f1b339596b0337  samples/two-column-paper.pdf (defaults)
 2b455a551c6d54d60f30a067137b67751cc472d79cd7ef0855f1b339596b0337  samples/two-column-paper.pdf -n 3
 c6bc6daa6937fb288d64a2a93697a785bf8d73b96ae44150a65b33bd8a6c65f1  samples/two-column-paper.pdf --words 150
@@ -30,4 +36,6 @@ c6bc6daa6937fb288d64a2a93697a785bf8d73b96ae44150a65b33bd8a6c65f1  samples/two-co
 d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --compress --words 150
 d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --simplify --compress --words 150
 d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --split --compress --simplify --words 150
+3356fd73af73b643fbb8d698fa7ec31ae0b30a1484bd318c82fb05777294b970  samples/two-column-paper.pdf --plain --words 150
+57fed74e94fd549da9a53bbb4cf765ba24cf564a442089ce43cff2783d7250ac  samples/two-column-paper.pdf --glossary --by-section
 08dfecb3b40cbbd91eed2e065103ce44acdd69c70ab5e72f6b3ba74cfc8c204c  samples/two-column-paper.pdf --extract-text

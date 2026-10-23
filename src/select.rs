@@ -66,6 +66,11 @@ pub struct Params {
     /// Pick this many sentences from every top-level section that has at least
     /// two candidates, instead of sharing `budget` by section size.
     pub per_section: Option<usize>,
+    /// `--plain`: weight of reading difficulty against relevance (0 = off).
+    /// Difficulty is `difficulty` (by sentence index), rescaled to 0..1 within
+    /// the document's candidates.
+    pub plainness: f32,
+    pub difficulty: Option<Vec<f32>>,
 }
 
 impl Default for Params {
@@ -87,6 +92,8 @@ impl Default for Params {
             want_features: false,
             word_cost: None,
             per_section: None,
+            plainness: 0.0,
+            difficulty: None,
         }
     }
 }
@@ -403,6 +410,21 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
             c + lead_bonus[ci] - penalties[ci]
         })
         .collect();
+    // Of two sentences with similar content, the plainer one.
+    let rel: Vec<f32> = match (&p.difficulty, p.plainness > 0.0) {
+        (Some(d), true) => {
+            // By rank, so a few extreme values (fragments) do not squash the rest.
+            let raw: Vec<f32> = cand.iter().map(|&si| d.get(si).copied().unwrap_or(0.0)).collect();
+            let mut order: Vec<usize> = (0..n).collect();
+            order.sort_by(|&a, &b| raw[a].total_cmp(&raw[b]).then(a.cmp(&b)));
+            let mut hard = vec![0f32; n];
+            for (rank, &ci) in order.iter().enumerate() {
+                hard[ci] = if n > 1 { rank as f32 / (n - 1) as f32 } else { 0.5 };
+            }
+            rel.iter().zip(&hard).map(|(r, h)| r - p.plainness * h).collect()
+        }
+        _ => rel,
+    };
 
     // Per-section share of the budget. Sub-linear weighting keeps a long
     // section from crowding out short but important ones.

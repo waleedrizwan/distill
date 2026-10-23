@@ -1,4 +1,4 @@
-use distill::{compress, embed, glossary, lexical, pdf, salience, segment, select, split};
+use distill::{compress, embed, glossary, lexical, pdf, readability, salience, segment, select, split};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -116,6 +116,16 @@ struct Args {
     #[arg(long)]
     expand_acronyms: bool,
 
+    /// Easier reading: prefer plainer sentences (shorter, shorter words) when
+    /// they say about as much, and turn on --compress, --split, --simplify,
+    /// --glossary and --expand-acronyms
+    #[arg(long)]
+    plain: bool,
+
+    /// --plain: weight of reading difficulty against relevance
+    #[arg(long, hide = true, default_value_t = 0.4)]
+    plainness: f32,
+
     /// Print every abbreviation definition found in the document and exit
     #[arg(long, hide = true)]
     dump_abbreviations: bool,
@@ -208,7 +218,14 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    if args.plain {
+        args.compress = true;
+        args.split = true;
+        args.simplify = true;
+        args.glossary = true;
+        args.expand_acronyms = true;
+    }
     let t0 = Instant::now();
 
     let bytes = match args.file.as_deref() {
@@ -309,6 +326,8 @@ fn run() -> Result<()> {
         want_features: args.dump_features,
         word_cost: None,
         per_section: args.by_section.map(|k| k.max(1)),
+        plainness: if args.plain { args.plainness.max(0.0) } else { 0.0 },
+        difficulty: args.plain.then(|| doc.sentences.iter().map(|s| readability::difficulty(&s.text)).collect()),
     };
     // Compressed text per sentence (None = unchanged). Ranking still embeds the
     // original sentence; only the output and the word budget use this.
