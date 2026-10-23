@@ -300,18 +300,34 @@ judge PDF handling, structure or jargon.
 
 ## Milestone 9: long-document ranking
 
-distill trails plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
+distill trailed plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
 5.2 (development). Papers are long too.
 
-- [ ] Try, one at a time and measured on development data: centrality that
-  depends on document length (less pull toward early text in long documents);
-  a salience weight that depends on length; pseudo-sections for text with no
-  headings (cut where the embeddings change most, as TextTiling does); and
-  retraining the salience head with GovReport and arXiv training documents
-  added.
-- [ ] **Gate:** govreport-dev ROUGE-2 +2.0 or more at reference length
-  (significant), papers not worse, and news and bills development sets not
-  significantly worse. Approaches that fail are written up as dropped.
+- [x] One knob at a time on govreport-dev at reference length: `--backward 1`
+  (undirected centrality) +3.65, centroid centrality +2.30, salience off
+  +1.56, `--lambda 1` +1.17, `--lambda 0.9` +0.78, no lead bonus +0.37. In
+  pairs: `--backward 1` with `--lambda 0.9` +4.74, with `--salience 0.3`
+  +4.77, with `--lambda 1` +4.66. On news and bills `--backward 1` cost -0.30
+  and -0.10 (not significant).
+- [x] **Kept: length-dependent defaults** (`select::LengthDefaults`). From 60
+  to 150 candidate sentences, `lambda` moves from 0.7 to 0.9 and `backward`
+  from 0.3 to 1; explicit flags override. Ramps of 100-250 (+3.32 on
+  govreport-dev) and 80-120 (+4.43) were tried; 60-150 gave +4.52. News and
+  bills are byte-identical on every development and test document.
+- [x] **Gate met.** govreport-dev +4.52 (95% CI +3.76 to +5.27); GovReport
+  test +3.56 at reference length (+1.93 to +5.19), now level with centroid at
+  22.5. Papers better, not significantly: +0.74 development, +0.89 test.
+  News and bills unchanged.
+- Cost: the old 10-paper arXiv set (lowercased, pre-tokenised) drops 2.73
+  ROUGE-2 at six sentences (significant), 0.90 at equal length (not). The
+  `backward` change is the cause (`lambda` alone: +0.75 at equal length).
+- Dropped: `backward` 0.65 for long documents. papers-dev +1.15
+  (significant) but govreport-dev only +2.28, and the papers difference
+  between 0.65 and 1 (0.4) is within noise on 30 papers. Not tried yet:
+  pseudo-sections for headingless text, and retraining the salience head
+  with reports and papers; both stay open below.
+- [ ] Pseudo-sections for text with no headings (TextTiling-style cuts).
+- [ ] Retrain the salience head with GovReport and arXiv training documents.
 
 ## Milestone 10: jargon glossary (`--glossary`)
 
