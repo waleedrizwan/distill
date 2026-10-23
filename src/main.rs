@@ -1,4 +1,4 @@
-use distill::{compress, embed, lexical, salience, segment, select, split};
+use distill::{compress, embed, lexical, pdf, salience, segment, select, split};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -122,6 +122,11 @@ struct Args {
     #[arg(long)]
     show_segments: bool,
 
+    /// Print the input's text as distill reads it (for a PDF, the extracted
+    /// text in reading order) and exit
+    #[arg(long)]
+    extract_text: bool,
+
     /// Print counts and timings to stderr
     #[arg(short, long)]
     verbose: bool,
@@ -174,17 +179,24 @@ fn run() -> Result<()> {
     let args = Args::parse();
     let t0 = Instant::now();
 
-    let raw = match args.file.as_deref() {
-        Some(p) if p != Path::new("-") => {
-            let bytes = std::fs::read(p).with_context(|| format!("reading {}", p.display()))?;
-            String::from_utf8_lossy(&bytes).into_owned()
-        }
+    let bytes = match args.file.as_deref() {
+        Some(p) if p != Path::new("-") => std::fs::read(p).with_context(|| format!("reading {}", p.display()))?,
         _ => {
-            let mut s = String::new();
-            std::io::stdin().read_to_string(&mut s).context("reading stdin")?;
-            s
+            let mut b = Vec::new();
+            std::io::stdin().read_to_end(&mut b).context("reading stdin")?;
+            b
         }
     };
+    // A PDF is turned into text with its own line joining and dehyphenation.
+    let raw = if pdf::is_pdf(&bytes) {
+        pdf::extract(&bytes).context("reading the PDF")?
+    } else {
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    if args.extract_text {
+        print!("{raw}");
+        return Ok(());
+    }
 
     let doc = segment::parse(
         &raw,

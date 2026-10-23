@@ -22,3 +22,12 @@ a77d2341c38f887634fb4e7b256d218be88df16697700726bd200fd8958e5131  samples/web-ar
 5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --compress --words 150
 5588e2c9f2b344529162935ffab3664f91b193b1acdaca650101a92eabbfd6f2  samples/web-article.txt --simplify --compress --words 150
 129fd01814d3a1bf8918b8ddea0a53f8a16a52485b889a41b85ef9faf574558b  samples/web-article.txt --split --compress --simplify --words 150
+2b455a551c6d54d60f30a067137b67751cc472d79cd7ef0855f1b339596b0337  samples/two-column-paper.pdf (defaults)
+2b455a551c6d54d60f30a067137b67751cc472d79cd7ef0855f1b339596b0337  samples/two-column-paper.pdf -n 3
+c6bc6daa6937fb288d64a2a93697a785bf8d73b96ae44150a65b33bd8a6c65f1  samples/two-column-paper.pdf --words 150
+2b455a551c6d54d60f30a067137b67751cc472d79cd7ef0855f1b339596b0337  samples/two-column-paper.pdf --centrality centroid
+2b455a551c6d54d60f30a067137b67751cc472d79cd7ef0855f1b339596b0337  samples/two-column-paper.pdf --no-repair --lambda 0.5
+d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --compress --words 150
+d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --simplify --compress --words 150
+d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --split --compress --simplify --words 150
+be2a70ada13a2ab23b2c0d37450c840e9fc1d16728a78689baa472e598ff7ff9  samples/two-column-paper.pdf --extract-text
