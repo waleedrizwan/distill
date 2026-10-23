@@ -54,7 +54,7 @@ if (!window.__distillLoaded) {
       return { id, text: entry.text };
     }
 
-    function apply({ id, ok, summary, error }) {
+    function apply({ id, ok, summary, error, glossary = [] }) {
       const entry = pending.get(id);
       if (!entry) return;
       pending.delete(id);
@@ -125,6 +125,21 @@ if (!window.__distillLoaded) {
         }
         out.append(line);
       });
+      // Abbreviations the summary uses without spelling out, defined in the
+      // page's own words. Part of the distilled text, so undo removes it too.
+      if (glossary.length) {
+        const g = document.createElement("span");
+        g.className = "distill-glossary";
+        g.append(document.createElement("b"));
+        g.firstChild.textContent = "Terms: ";
+        glossary.forEach(({ term, definition }, i) => {
+          if (i) g.append("; ");
+          const t = document.createElement("i");
+          t.textContent = term;
+          g.append(t, ` ${definition}`);
+        });
+        out.append(g);
+      }
       // Put the summary in the paragraph the selection started in, rather than
       // between paragraphs, and drop a trailing paragraph the selection emptied.
       if (startBlock !== host && startBlock.isConnected) startBlock.append(out);

@@ -292,7 +292,7 @@ fn drop_title_block(paragraphs: Vec<Vec<String>>) -> Vec<Vec<String>> {
 fn mark_headings(lines: &[Line], groups: Vec<Vec<usize>>) -> Vec<Vec<String>> {
     static NUMBERED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let numbered = NUMBERED.get_or_init(|| {
-        regex::Regex::new(r"^((?:\d{1,2}(?:\.\d{1,2}){0,3}\.?)|(?:[IVX]{1,5}\.)|(?:[A-Z](?:\.\d{1,2}){0,3}\.?))\s+\p{Lu}").unwrap()
+        regex::Regex::new(r"^((?:\d{1,2}(?:\.\d{1,2}){0,3}\.?)|(?:[IVX]{1,5}\.)|(?:[A-J](?:\.\d{1,2}){0,3}\.?))\s+\p{Lu}").unwrap()
     });
     let body = body_size(lines);
     groups
@@ -794,6 +794,9 @@ mod tests {
         assert_eq!(out[6], "## B.1 More Results");
         assert_eq!(out[7], "# Results");
         assert_eq!(out[8], "Domain", "a small label from a figure is not a heading");
+        // Appendix letters run A to J; "R Rmax" is an axis label.
+        let l = line(0, 72.0, 300.0, 60.0, "R Rmax");
+        assert_eq!(mark_headings(&[l], vec![vec![0]])[0], ["R Rmax"]);
     }
 
     #[test]

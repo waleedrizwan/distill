@@ -127,3 +127,12 @@
 ::highlight(distill-original) {
   background-color: rgba(120, 170, 255, 0.25);
 }
+
+/* Abbreviations defined under the distilled text. */
+.distill-glossary {
+  display: block;
+  margin-top: 0.5em;
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+.distill-glossary i { font-style: normal; font-weight: 600; }
