@@ -12,13 +12,12 @@ authors and abstract are not in it. Everything after, references included, is
 left in: handling that is distill's job.
 
     python3 eval/fetch_papers.py              # download what is missing, verify, write jsonl
-    python3 eval/fetch_papers.py --extractor distill   # text from `distill --extract-text`
     python3 eval/fetch_papers.py --select     # (re)choose the papers, write eval/papers.tsv
 
 eval/papers.tsv pins each paper's version and the SHA-256 of its PDF, so a
 changed download fails instead of quietly changing the scores. The PDFs are not
-committed. Standard library only, plus `pdftotext` (poppler) for the default
-extractor.
+committed. Standard library only, plus `pdftotext` (poppler), which turns each
+PDF into the text distill reads.
 """
 
 import argparse
@@ -147,19 +146,14 @@ def download(vid):
     return path.read_bytes()
 
 
-def extract(path, extractor):
-    if extractor == "pdftotext":
-        cmd = ["pdftotext", "-enc", "UTF-8", str(path), "-"]
-    else:
-        cmd = [str(ROOT / "target" / "release" / "distill"), "--extract-text", str(path)]
+def extract(path):
+    cmd = ["pdftotext", "-enc", "UTF-8", str(path), "-"]
     r = subprocess.run(cmd, capture_output=True)
     if r.returncode != 0:
         raise RuntimeError(f"{' '.join(cmd)} failed: {r.stderr.decode(errors='replace')[:200]}")
     text = r.stdout.decode("utf-8", errors="replace")
-    if extractor == "pdftotext":
-        # What `distill --dehyphenate` does, so every method sees the same text.
-        text = re.sub(r"([a-z])-\n *([a-z])", r"\1\2", text)
-    return text
+    # What `distill --dehyphenate` does, so every method sees the same text.
+    return re.sub(r"([a-z])-\n *([a-z])", r"\1\2", text)
 
 
 def body(text):
@@ -182,7 +176,7 @@ def select():
                     continue
                 try:
                     data = download(e["id"])
-                    text = body(extract(pdf_path(e["id"]), "pdftotext"))
+                    text = body(extract(pdf_path(e["id"])))
                 except Exception as err:  # noqa: BLE001 - any failure just skips the paper
                     print(f"  skip {e['id']}: {err}", file=sys.stderr)
                     continue
@@ -204,7 +198,7 @@ def select():
     print(f"wrote {TABLE.relative_to(ROOT)}")
 
 
-def build(extractor):
+def build():
     rows = [line.split("\t") for line in TABLE.read_text().splitlines() if line and not line.startswith("#")]
     refs = abstracts([r[2] for r in rows])
     bad = 0
@@ -220,9 +214,9 @@ def build(extractor):
             print(f"{vid}: abstract changed", file=sys.stderr)
             bad += 1
             continue
-        text = body(extract(pdf_path(vid), extractor))
+        text = body(extract(pdf_path(vid)))
         if text is None:
-            print(f"{vid}: no Introduction heading in the {extractor} text", file=sys.stderr)
+            print(f"{vid}: no Introduction heading in the pdftotext text", file=sys.stderr)
             bad += 1
             continue
         out[name].append({"id": vid, "category": cat, "text": text, "reference": ref})
@@ -230,7 +224,7 @@ def build(extractor):
         with open(DATA / f"{name}.jsonl", "w") as f:
             for d in docs:
                 f.write(json.dumps(d, ensure_ascii=False) + "\n")
-        print(f"{name}: {len(docs)} papers in eval/data/{name}.jsonl (text from {extractor})")
+        print(f"{name}: {len(docs)} papers in eval/data/{name}.jsonl")
     if bad:
         sys.exit(f"{bad} papers did not match eval/papers.tsv; scores would not be comparable")
 
@@ -238,12 +232,11 @@ def build(extractor):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--select", action="store_true", help="choose the papers and write eval/papers.tsv")
-    ap.add_argument("--extractor", choices=["pdftotext", "distill"], default="distill")
     args = ap.parse_args()
     DATA.mkdir(exist_ok=True)
     if args.select:
         select()
-    build(args.extractor)
+    build()
 
 
 if __name__ == "__main__":
