@@ -238,17 +238,24 @@ Ground rules for Part 2 (agreed 2026-10-22):
 The arXiv set has 10 documents, lowercased and pre-tokenised, so it cannot
 judge PDF handling, structure or jargon.
 
-- [ ] `eval/papers.tsv`: about 30 open-access arXiv papers across fields (ML,
-  biology, physics, economics, maths, social science), pinned by arXiv ID
-  and version, with the SHA-256 of each PDF. `fetch_data.py` downloads them
-  and their abstracts from the arXiv API. The PDFs are not committed.
-- [ ] Reference summary = the abstract. Input = the paper with its abstract
-  removed. Text comes from `pdftotext` at first, and from Milestone 7 once it
-  exists.
-- [ ] `score.py` gains a readability column: Flesch-Kincaid grade of the
-  summary, and the share of its words outside the 20,000 most frequent English
-  words. Lower is plainer.
-- [ ] Baseline table for lead, centroid and distill on `papers`, in the README.
+- [x] `eval/papers.tsv`: 30 test and 30 development arXiv papers, chosen by
+  rule rather than by hand (the first five per category in a fixed week that
+  pass length and structure filters), in six fields: cs.CL, q-bio.QM,
+  cond-mat.mtrl-sci, astro-ph.EP, econ.GN and stat.ME. Pinned by versioned ID,
+  with the SHA-256 of each PDF and abstract. `eval/fetch_papers.py` downloads
+  them, pacing itself as arXiv asks and caching API answers. Maths papers were
+  planned but are not in: with few prose abstracts and no Introduction heading
+  they rarely pass the filters, and stat.ME covers formula-heavy writing.
+- [x] Reference summary = the abstract. Input = the text from the first
+  "Introduction" (or "Background") heading on. Text comes from `pdftotext`
+  (dehyphenated as `--dehyphenate` does) until Milestone 7.
+- [x] `score.py` gains FK (Flesch-Kincaid grade) and Rare% (share of words
+  outside the 20,000 most frequent in the news training articles) columns.
+- [x] Baseline in the README. At reference length on the test papers, ROUGE-2:
+  lead 10.1, centroid 8.2, distill 7.9. On the development papers: lead 7.1,
+  centroid 9.4, distill 8.7. distill is behind on papers, which is what the
+  rest of Part 2 has to fix. Its picks are the plainest (FK 12.3 against 13.7
+  for lead on test).
 
 ## Milestone 7: native PDF input
 

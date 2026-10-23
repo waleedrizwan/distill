@@ -116,15 +116,27 @@ Everything in this section is reproducible from the repo:
 
 ```sh
 python3 eval/fetch_data.py   # downloads the frozen sample, checks it against eval/manifest.tsv
+python3 eval/fetch_papers.py # the arXiv papers (PDFs pinned in eval/papers.tsv; needs pdftotext)
 cargo build --release
-python3 eval/score.py        # about 30 s on an M-series Mac
+python3 eval/score.py        # a few minutes on an M-series Mac
 ```
 
 The sample is the first 100 CNN/DailyMail test articles, the first 60 BillSum
-test bills, the first 10 arXiv test papers and the first 30 GovReport test
-reports. The text is not committed, but
+test bills, the first 10 arXiv test papers, the first 30 GovReport test
+reports, and 30 research papers as PDFs (below). The text is not committed, but
 each document's SHA-256 is, so a different download fails instead of quietly
-changing the scores. ROUGE is computed by `eval/score.py` with no stemming, so
+changing the scores.
+
+The papers set (`eval/fetch_papers.py`) is chosen by rule: for each of six
+arXiv categories (computational linguistics, quantitative biology, materials
+science, planetary astrophysics, economics, statistical methodology), the first
+five papers submitted in the week of 3 March 2025 whose PDF has an
+"Introduction" (or "Background") heading, 2,000 to 20,000 words of body text
+and an abstract of at least 80 words. The reference summary is the abstract;
+the input is the paper's text from the Introduction heading on, so the
+abstract itself is not in it. References, captions and appendices are left
+in. Text comes from `pdftotext`. A development set of 30 more papers comes
+from the week of 3 February 2025. ROUGE is computed by `eval/score.py` with no stemming, so
 the numbers are only comparable within this table.
 
 Each set is scored twice. "N sentences" is the original setup. "ref length"
@@ -132,32 +144,38 @@ gives every method a word budget equal to that document's reference summary,
 which removes the advantage of picking longer sentences. Under a word budget,
 the context sentences distill adds for readability count against the budget.
 
-| Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words |
-|---|---|---|---|---|---|---|
-| cnndm (n=100) | 3 sentences | lead | 29.4 | 12.3 | 21.1 | 66 |
-|  |  | centroid | 26.3 | 8.9 | 17.7 | 77 |
-|  |  | distill | **31.0** | **13.4** | **22.4** | **74** |
-|  | ref length (34 w) | lead | 27.5 | 8.9 | 19.4 | 33 |
-|  |  | centroid | 25.9 | 7.3 | 17.2 | 32 |
-|  |  | distill | **27.3** | **9.4** | **19.3** | **32** |
-| billsum (n=60) | 5 sentences | lead | 36.6 | 16.9 | 24.2 | 115 |
-|  |  | centroid | 38.1 | 17.1 | 23.5 | 237 |
-|  |  | distill | **41.6** | **21.9** | **27.8** | **222** |
-|  | ref length (168 w) | lead | 42.8 | 19.7 | 27.4 | 166 |
-|  |  | centroid | 41.1 | 16.2 | 24.5 | 164 |
-|  |  | distill | **43.6** | **20.6** | **28.2** | **162** |
-| arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 |
-|  |  | centroid | 28.8 | 8.8 | 15.9 | 326 |
-|  |  | distill | **37.5** | **14.3** | **21.2** | **232** |
-|  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 |
-|  |  | centroid | 36.0 | 10.9 | 21.5 | 140 |
-|  |  | distill | **39.1** | **13.5** | **21.8** | **139** |
-| govreport (n=30) | 20 sentences | lead | 44.6 | 13.2 | 17.9 | 530 |
-|  |  | centroid | 54.0 | 22.5 | 21.6 | 725 |
-|  |  | distill | **52.6** | **18.6** | **20.5** | **626** |
-|  | ref length (599 w) | lead | 46.3 | 13.7 | 18.0 | 598 |
-|  |  | centroid | 56.4 | 22.5 | 21.8 | 596 |
-|  |  | distill | **54.0** | **19.0** | **20.8** | **597** |
+| Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words | FK | Rare% |
+|---|---|---|---|---|---|---|---|---|
+| cnndm (n=100) | 3 sentences | lead | 29.4 (+0.0) | 12.3 (+0.0) | 21.1 (+0.0) | 66 (+0) | 12.1 | 4.4 |
+|  |  | centroid | 26.3 (+0.0) | 8.9 (+0.0) | 17.7 (+0.0) | 77 (+0) | 13.6 | 4.9 |
+|  |  | distill | **31.0 (+0.0)** | **13.4 (+0.0)** | **22.4 (+0.0)** | **74 (+0)** | **13.2** | **5.2** |
+|  | ref length (34 w) | lead | 27.5 (+0.0) | 8.9 (+0.0) | 19.4 (+0.0) | 33 (+0) | 10.4 | 4.0 |
+|  |  | centroid | 25.9 (+0.0) | 7.3 (+0.0) | 17.2 (+0.0) | 32 (+0) | 10.9 | 5.0 |
+|  |  | distill | **27.3 (+0.0)** | **9.4 (+0.0)** | **19.3 (+0.0)** | **32 (+0)** | **11.0** | **4.7** |
+| billsum (n=60) | 5 sentences | lead | 36.6 (+0.0) | 16.9 (+0.0) | 24.2 (+0.0) | 115 (+0) | 14.4 | 4.3 |
+|  |  | centroid | 38.1 (+0.0) | 17.1 (+0.0) | 23.5 (+0.0) | 237 (+0) | 24.2 | 4.2 |
+|  |  | distill | **41.6 (+0.0)** | **21.9 (+0.0)** | **27.8 (+0.0)** | **222 (+0)** | **18.2** | **3.8** |
+|  | ref length (168 w) | lead | 42.8 (+0.0) | 19.7 (+0.0) | 27.4 (+0.0) | 166 (+0) | 12.8 | 4.5 |
+|  |  | centroid | 41.1 (+0.0) | 16.2 (+0.0) | 24.5 (+0.0) | 164 (+0) | 17.0 | 4.7 |
+|  |  | distill | **43.6 (+0.0)** | **20.6 (+0.0)** | **28.2 (+0.0)** | **162 (+0)** | **14.7** | **4.2** |
+| arxiv (n=10) | 6 sentences | lead | 34.3 (+0.0) | 11.2 (+0.0) | 18.9 (+0.0) | 194 (+0) | 16.5 | 16.4 |
+|  |  | centroid | 28.8 (+0.0) | 8.8 (+0.0) | 15.9 (+0.0) | 326 (+0) | 21.3 | 20.2 |
+|  |  | distill | **37.5 (+0.0)** | **14.3 (+0.0)** | **21.2 (+0.0)** | **232 (+0)** | **18.4** | **19.4** |
+|  | ref length (142 w) | lead | 36.0 (+0.0) | 11.5 (+0.0) | 20.1 (+0.0) | 142 (+0) | 12.8 | 17.2 |
+|  |  | centroid | 36.0 (+0.0) | 10.9 (+0.0) | 21.5 (+0.0) | 140 (+0) | 15.8 | 20.0 |
+|  |  | distill | **39.1 (+0.0)** | **13.5 (+0.0)** | **21.8 (+0.0)** | **139 (+0)** | **14.9** | **19.8** |
+| govreport (n=30) | 20 sentences | lead | 44.6 (+0.0) | 13.2 (+0.0) | 17.9 (+0.0) | 530 (+0) | 17.2 | 6.2 |
+|  |  | centroid | 54.0 (+0.0) | 22.5 (+0.0) | 21.6 (+0.0) | 725 (+0) | 21.2 | 6.8 |
+|  |  | distill | **52.6 (+0.0)** | **18.6 (+0.0)** | **20.5 (+0.0)** | **626 (+0)** | **18.8** | **6.7** |
+|  | ref length (599 w) | lead | 46.3 (+0.0) | 13.7 (+0.0) | 18.0 (+0.0) | 598 (+0) | 16.6 | 6.3 |
+|  |  | centroid | 56.4 (+0.0) | 22.5 (+0.0) | 21.8 (+0.0) | 596 (+0) | 20.8 | 6.8 |
+|  |  | distill | **54.0 (+0.0)** | **19.0 (+0.0)** | **20.8 (+0.0)** | **597 (+0)** | **18.4** | **6.8** |
+| papers (n=30) | 8 sentences | lead | 32.8 | 10.0 | 16.9 | 180 | 16.1 | 14.5 |
+|  |  | centroid | 34.1 | 8.2 | 15.6 | 261 | 18.1 | 17.0 |
+|  |  | distill | **35.1** | **8.5** | **16.2** | **210** | **15.9** | **17.0** |
+|  | ref length (194 w) | lead | 33.8 | 10.1 | 17.1 | 194 | 13.7 | 14.4 |
+|  |  | centroid | 35.0 | 8.2 | 16.2 | 192 | 12.8 | 18.4 |
+|  |  | distill | **34.7** | **7.9** | **15.7** | **192** | **12.3** | **17.8** |
 
 What this shows:
 
@@ -177,16 +195,27 @@ What this shows:
   text repeats works against it, and the salience score, trained only on news
   and bills, costs a little more. The reports also arrive as one block of text
   with no headings or paragraphs, so section budgets have nothing to work with.
+- **Research papers: distill is not ahead yet.** On the 30 test papers at
+  equal length the first sentences of the introduction score best (10.1
+  ROUGE-2, against 7.9 for distill); on the 30 development papers plain
+  centroid ranking does (9.4, against 8.7). distill's picks are the plainest
+  of the three (Flesch-Kincaid grade 12.3, against 13.7 for the first
+  sentences). Part 2 of the roadmap works on this.
 - **The learned salience score** is where most of the gain comes from. Against
   the same pipeline without it, ROUGE-2 at equal length rose by 1.9 points on
   the bills and 2.2 on the papers (both significant) and 0.4 on news (not
   significant).
 
+FK is the Flesch-Kincaid grade of the summary (lower is plainer) and Rare% the
+share of its words outside the 20,000 most frequent words of the news training
+articles, a rough measure of jargon. They describe the sentences chosen, not
+whether they are good ones.
+
 Knobs are tuned on separate development sets (500 CNN/DailyMail validation
-articles, 300 BillSum training bills and 100 GovReport validation reports),
-never on the test sets above. Run `python3 eval/score.py --sets
-cnndm-dev,billsum-dev,govreport-dev --budget words --compare
-eval/dev-baseline.json` after a change. It prints the difference in every cell
+articles, 300 BillSum training bills, 100 GovReport validation reports and
+30 development papers), never on the test sets above. Run `python3
+eval/score.py --sets cnndm-dev,billsum-dev,govreport-dev,papers-dev --budget
+words --compare eval/dev-baseline.json` after a change. It prints the difference in every cell
 and a paired bootstrap 95% interval for distill's ROUGE-2, so a change only
 counts when the interval excludes zero. `eval/baseline.json` holds the test
 results in the same format.
