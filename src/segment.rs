@@ -106,6 +106,7 @@ re!(
     r"(?ix)
       ^(?:read\ more|read\ also|also\ read|see\ also|related|more|watch|video|photos?|gallery|listen|recommended|sponsored|advertisement|ad)\s*[:|>\u{00BB}]
     | ^click\ here\b
+    | ^(?:for\ other\ uses|for\ the\ \w+\ sense)\b.*\bsee\b | ^this\ article\ is\ about\b | ^not\ to\ be\ confused\ with\b
     | ^skip\ to\ (?:main\ )?content\b
     | ^(?:\u{00A9}|copyright\ \u{00A9}?)\s*\d{4}
     | \ball\ rights\ reserved\b
@@ -529,7 +530,8 @@ impl Builder {
             return false;
         }
         let t = s.trim_end();
-        if t.ends_with('?') || ends_with_lead_in(t) {
+        // A question, a lead-in, or a teaser cut short with "…".
+        if t.ends_with('?') || t.ends_with('\u{2026}') || ends_with_lead_in(t) {
             return false;
         }
         if re_caption().is_match(t) || re_bib_entry().is_match(t) || re_meta().is_match(t) {

@@ -1,4 +1,4 @@
-use distill::{compress, embed, glossary, lexical, pdf, readability, salience, segment, select, split};
+use distill::{compress, embed, glossary, html, lexical, pdf, readability, salience, segment, select, split};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -228,7 +228,10 @@ fn run() -> Result<()> {
     }
     let t0 = Instant::now();
 
+    let url = args.file.as_deref().and_then(Path::to_str).filter(|s| s.starts_with("http://") || s.starts_with("https://"));
     let bytes = match args.file.as_deref() {
+        // The only place distill uses the network: an argument that is a URL.
+        Some(_) if url.is_some() => fetch(url.unwrap())?,
         Some(p) if p != Path::new("-") => std::fs::read(p).with_context(|| format!("reading {}", p.display()))?,
         _ => {
             let mut b = Vec::new();
@@ -239,6 +242,8 @@ fn run() -> Result<()> {
     // A PDF is turned into text with its own line joining and dehyphenation.
     let raw = if pdf::is_pdf(&bytes) {
         pdf::extract(&bytes).context("reading the PDF")?
+    } else if html::is_html(&bytes) {
+        html::to_text(&String::from_utf8_lossy(&bytes))
     } else {
         String::from_utf8_lossy(&bytes).into_owned()
     };
@@ -647,6 +652,24 @@ fn embed_cached(embedder: &embed::Embedder, texts: &[&str], batch_size: usize) -
         let _ = std::fs::remove_file(&tmp);
     }
     Ok(vectors)
+}
+
+/// Download a page or a PDF. An arXiv abstract page ("arxiv.org/abs/ID")
+/// fetches the paper's PDF instead.
+fn fetch(url: &str) -> Result<Vec<u8>> {
+    const LIMIT: u64 = 64 << 20;
+    let url = match url.split_once("arxiv.org/abs/") {
+        Some((scheme_host, id)) => format!("{scheme_host}arxiv.org/pdf/{id}"),
+        None => url.to_string(),
+    };
+    let resp = ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(60))
+        .set("User-Agent", concat!("distill/", env!("CARGO_PKG_VERSION")))
+        .call()
+        .with_context(|| format!("fetching {url}"))?;
+    let mut bytes = Vec::new();
+    resp.into_reader().take(LIMIT).read_to_end(&mut bytes).with_context(|| format!("reading {url}"))?;
+    Ok(bytes)
 }
 
 fn find_model(explicit: Option<&Path>) -> Result<PathBuf> {

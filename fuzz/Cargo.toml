@@ -63,3 +63,10 @@ path = "fuzz_targets/glossary.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "html"
+path = "fuzz_targets/html.rs"
+test = false
+doc = false
+bench = false

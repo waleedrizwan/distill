@@ -427,10 +427,16 @@ distill trailed plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
   shown under the distilled text; the PDF reader gets "Summarize whole paper"
   (section by section). The native host passes the new options through.
   Checked in Chrome on one arXiv PDF and one news page.
-- [ ] `distill https://...`, opt-in by the argument: fetch the page (`ureq`,
-  already a dependency); PDFs go through Milestone 7, HTML through a simple
-  main-content extractor and then the boilerplate filter. arXiv `abs/` links
-  fetch the PDF. No other code path touches the network.
+- [x] `distill https://...`, opt-in by the argument (`ureq`, 60 s timeout,
+  64 MB limit). PDFs go through Milestone 7; HTML (also local `.html`
+  files) through `src/html.rs`: article or main content, scripts, styles,
+  navigation, headers, footers, asides, forms, figures and link-only list
+  items dropped, headings to Markdown, entities decoded; then the boilerplate
+  filter, which now also drops encyclopedia hatnotes ("For other uses,
+  see ...") and teasers cut off with "…". arXiv `abs/` links fetch the PDF.
+  No other code path touches the network. Checked on an arXiv abstract link,
+  a Wikipedia article and a NASA page; unit, property and fuzz tests (`html`,
+  in CI). News and bills unchanged.
 
 **Order and scope for the first session:** Milestones 5 to 9 are expected to
 land. Milestones 10 to 12 are worked in order as time allows; anything
