@@ -416,6 +416,11 @@ toast shows how many words were cut. Click the distilled text to compare it with
 the original, and press Ctrl+Z / Cmd+Z (or the toast's Undo button) to put the
 original back. Works in text boxes too.
 
+The extension's options (right-click its icon, **Options**) have two switches:
+**Plain mode** (`--plain`) and **Glossary** (on by default), which lists under
+the distilled text the abbreviations it uses without spelling out, in the
+page's own words. Both apply everywhere the extension distills.
+
 ```sh
 ./install.sh   # fetches the model, builds, registers the native helper with Chrome
 ```
@@ -426,7 +431,10 @@ and pick the `extension/` folder. Reload any tabs that were already open.
 **PDFs.** Chrome's built-in PDF viewer can't be edited by extensions, so using
 Distill there reopens the PDF in the Distill reader (same tab) and distills the
 same passage. The reader shows the PDF as plain reflowed text (via PDF.js, in
-`extension/vendor`), where everything above works. You can also click the
+`extension/vendor`), where everything above works. Its **Summarize paper**
+button sends the PDF itself to distill (whose own PDF reader is better at
+columns, headers and footnotes than PDF.js's text) and shows two sentences
+from each section, with the glossary, above the text. You can also click the
 toolbar icon on a PDF, or right-click a PDF link and choose "Open PDF in Distill
 reader". For local `file://` PDFs, turn on "Allow access to file URLs" in the
 extension's details. Scanned PDFs without a text layer won't work.

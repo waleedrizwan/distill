@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Distill",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Right-click highlighted text and replace it with its most important sentences.",
   "icons": {
     "16": "icons/icon16.png",
@@ -43,5 +43,9 @@
   ],
   "host_permissions": [
     "<all_urls>"
-  ]
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
 }
