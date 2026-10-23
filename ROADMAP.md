@@ -252,9 +252,9 @@ judge PDF handling, structure or jargon.
 - [x] `score.py` gains FK (Flesch-Kincaid grade) and Rare% (share of words
   outside the 20,000 most frequent in the news training articles) columns.
 - [x] Baseline in the README. At reference length on the test papers, ROUGE-2:
-  lead 10.1, centroid 8.2, distill 7.9. On the development papers: lead 7.1,
+  lead 10.2, centroid 8.3, distill 8.1. On the development papers: lead 7.1,
   centroid 9.4, distill 8.7. distill is behind on papers, which is what the
-  rest of Part 2 has to fix. Its picks are the plainest (FK 12.3 against 13.7
+  rest of Part 2 has to fix. Its picks are the plainest (FK 12.2 against 13.9
   for lead on test).
 
 ## Milestone 7: native PDF input

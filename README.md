@@ -130,7 +130,7 @@ changing the scores.
 The papers set (`eval/fetch_papers.py`) is chosen by rule: for each of six
 arXiv categories (computational linguistics, quantitative biology, materials
 science, planetary astrophysics, economics, statistical methodology), the first
-five papers submitted in the week of 3 March 2025 whose PDF has an
+five papers submitted in the week of 3 March 2025 whose PDF has a capitalised
 "Introduction" (or "Background") heading, 2,000 to 20,000 words of body text
 and an abstract of at least 80 words. The reference summary is the abstract;
 the input is the paper's text from the Introduction heading on, so the
@@ -146,36 +146,36 @@ the context sentences distill adds for readability count against the budget.
 
 | Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words | FK | Rare% |
 |---|---|---|---|---|---|---|---|---|
-| cnndm (n=100) | 3 sentences | lead | 29.4 (+0.0) | 12.3 (+0.0) | 21.1 (+0.0) | 66 (+0) | 12.1 | 4.4 |
-|  |  | centroid | 26.3 (+0.0) | 8.9 (+0.0) | 17.7 (+0.0) | 77 (+0) | 13.6 | 4.9 |
-|  |  | distill | **31.0 (+0.0)** | **13.4 (+0.0)** | **22.4 (+0.0)** | **74 (+0)** | **13.2** | **5.2** |
-|  | ref length (34 w) | lead | 27.5 (+0.0) | 8.9 (+0.0) | 19.4 (+0.0) | 33 (+0) | 10.4 | 4.0 |
-|  |  | centroid | 25.9 (+0.0) | 7.3 (+0.0) | 17.2 (+0.0) | 32 (+0) | 10.9 | 5.0 |
-|  |  | distill | **27.3 (+0.0)** | **9.4 (+0.0)** | **19.3 (+0.0)** | **32 (+0)** | **11.0** | **4.7** |
-| billsum (n=60) | 5 sentences | lead | 36.6 (+0.0) | 16.9 (+0.0) | 24.2 (+0.0) | 115 (+0) | 14.4 | 4.3 |
-|  |  | centroid | 38.1 (+0.0) | 17.1 (+0.0) | 23.5 (+0.0) | 237 (+0) | 24.2 | 4.2 |
-|  |  | distill | **41.6 (+0.0)** | **21.9 (+0.0)** | **27.8 (+0.0)** | **222 (+0)** | **18.2** | **3.8** |
-|  | ref length (168 w) | lead | 42.8 (+0.0) | 19.7 (+0.0) | 27.4 (+0.0) | 166 (+0) | 12.8 | 4.5 |
-|  |  | centroid | 41.1 (+0.0) | 16.2 (+0.0) | 24.5 (+0.0) | 164 (+0) | 17.0 | 4.7 |
-|  |  | distill | **43.6 (+0.0)** | **20.6 (+0.0)** | **28.2 (+0.0)** | **162 (+0)** | **14.7** | **4.2** |
-| arxiv (n=10) | 6 sentences | lead | 34.3 (+0.0) | 11.2 (+0.0) | 18.9 (+0.0) | 194 (+0) | 16.5 | 16.4 |
-|  |  | centroid | 28.8 (+0.0) | 8.8 (+0.0) | 15.9 (+0.0) | 326 (+0) | 21.3 | 20.2 |
-|  |  | distill | **37.5 (+0.0)** | **14.3 (+0.0)** | **21.2 (+0.0)** | **232 (+0)** | **18.4** | **19.4** |
-|  | ref length (142 w) | lead | 36.0 (+0.0) | 11.5 (+0.0) | 20.1 (+0.0) | 142 (+0) | 12.8 | 17.2 |
-|  |  | centroid | 36.0 (+0.0) | 10.9 (+0.0) | 21.5 (+0.0) | 140 (+0) | 15.8 | 20.0 |
-|  |  | distill | **39.1 (+0.0)** | **13.5 (+0.0)** | **21.8 (+0.0)** | **139 (+0)** | **14.9** | **19.8** |
-| govreport (n=30) | 20 sentences | lead | 44.6 (+0.0) | 13.2 (+0.0) | 17.9 (+0.0) | 530 (+0) | 17.2 | 6.2 |
-|  |  | centroid | 54.0 (+0.0) | 22.5 (+0.0) | 21.6 (+0.0) | 725 (+0) | 21.2 | 6.8 |
-|  |  | distill | **52.6 (+0.0)** | **18.6 (+0.0)** | **20.5 (+0.0)** | **626 (+0)** | **18.8** | **6.7** |
-|  | ref length (599 w) | lead | 46.3 (+0.0) | 13.7 (+0.0) | 18.0 (+0.0) | 598 (+0) | 16.6 | 6.3 |
-|  |  | centroid | 56.4 (+0.0) | 22.5 (+0.0) | 21.8 (+0.0) | 596 (+0) | 20.8 | 6.8 |
-|  |  | distill | **54.0 (+0.0)** | **19.0 (+0.0)** | **20.8 (+0.0)** | **597 (+0)** | **18.4** | **6.8** |
-| papers (n=30) | 8 sentences | lead | 32.8 | 10.0 | 16.9 | 180 | 16.1 | 14.5 |
-|  |  | centroid | 34.1 | 8.2 | 15.6 | 261 | 18.1 | 17.0 |
-|  |  | distill | **35.1** | **8.5** | **16.2** | **210** | **15.9** | **17.0** |
-|  | ref length (194 w) | lead | 33.8 | 10.1 | 17.1 | 194 | 13.7 | 14.4 |
-|  |  | centroid | 35.0 | 8.2 | 16.2 | 192 | 12.8 | 18.4 |
-|  |  | distill | **34.7** | **7.9** | **15.7** | **192** | **12.3** | **17.8** |
+| cnndm (n=100) | 3 sentences | lead | 29.4 | 12.3 | 21.1 | 66 | 12.1 | 4.4 |
+|  |  | centroid | 26.3 | 8.9 | 17.7 | 77 | 13.6 | 4.9 |
+|  |  | distill | **31.0** | **13.4** | **22.4** | **74** | **13.2** | **5.2** |
+|  | ref length (34 w) | lead | 27.5 | 8.9 | 19.4 | 33 | 10.4 | 4.0 |
+|  |  | centroid | 25.9 | 7.3 | 17.2 | 32 | 10.9 | 5.0 |
+|  |  | distill | **27.3** | **9.4** | **19.3** | **32** | **11.0** | **4.7** |
+| billsum (n=60) | 5 sentences | lead | 36.6 | 16.9 | 24.2 | 115 | 14.4 | 4.3 |
+|  |  | centroid | 38.1 | 17.1 | 23.5 | 237 | 24.2 | 4.2 |
+|  |  | distill | **41.6** | **21.9** | **27.8** | **222** | **18.2** | **3.8** |
+|  | ref length (168 w) | lead | 42.8 | 19.7 | 27.4 | 166 | 12.8 | 4.5 |
+|  |  | centroid | 41.1 | 16.2 | 24.5 | 164 | 17.0 | 4.7 |
+|  |  | distill | **43.6** | **20.6** | **28.2** | **162** | **14.7** | **4.2** |
+| arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 | 16.5 | 16.4 |
+|  |  | centroid | 28.8 | 8.8 | 15.9 | 326 | 21.3 | 20.2 |
+|  |  | distill | **37.5** | **14.3** | **21.2** | **232** | **18.4** | **19.4** |
+|  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 | 12.8 | 17.2 |
+|  |  | centroid | 36.0 | 10.9 | 21.5 | 140 | 15.8 | 20.0 |
+|  |  | distill | **39.1** | **13.5** | **21.8** | **139** | **14.9** | **19.8** |
+| govreport (n=30) | 20 sentences | lead | 44.6 | 13.2 | 17.9 | 530 | 17.2 | 6.2 |
+|  |  | centroid | 54.0 | 22.5 | 21.6 | 725 | 21.2 | 6.8 |
+|  |  | distill | **52.6** | **18.6** | **20.5** | **626** | **18.8** | **6.7** |
+|  | ref length (599 w) | lead | 46.3 | 13.7 | 18.0 | 598 | 16.6 | 6.3 |
+|  |  | centroid | 56.4 | 22.5 | 21.8 | 596 | 20.8 | 6.8 |
+|  |  | distill | **54.0** | **19.0** | **20.8** | **597** | **18.4** | **6.8** |
+| papers (n=30) | 8 sentences | lead | 34.0 | 10.2 | 17.5 | 185 | 16.5 | 14.4 |
+|  |  | centroid | 34.5 | 8.3 | 15.7 | 261 | 18.1 | 16.8 |
+|  |  | distill | **35.3** | **8.6** | **16.3** | **211** | **15.9** | **16.7** |
+|  | ref length (194 w) | lead | 34.5 | 10.2 | 17.4 | 194 | 13.9 | 14.4 |
+|  |  | centroid | 35.3 | 8.3 | 16.3 | 193 | 12.8 | 18.4 |
+|  |  | distill | **35.2** | **8.1** | **15.9** | **192** | **12.2** | **17.7** |
 
 What this shows:
 
@@ -196,10 +196,10 @@ What this shows:
   and bills, costs a little more. The reports also arrive as one block of text
   with no headings or paragraphs, so section budgets have nothing to work with.
 - **Research papers: distill is not ahead yet.** On the 30 test papers at
-  equal length the first sentences of the introduction score best (10.1
-  ROUGE-2, against 7.9 for distill); on the 30 development papers plain
+  equal length the first sentences of the introduction score best (10.2
+  ROUGE-2, against 8.1 for distill); on the 30 development papers plain
   centroid ranking does (9.4, against 8.7). distill's picks are the plainest
-  of the three (Flesch-Kincaid grade 12.3, against 13.7 for the first
+  of the three (Flesch-Kincaid grade 12.2, against 13.9 for the first
   sentences). Part 2 of the roadmap works on this.
 - **The learned salience score** is where most of the gain comes from. Against
   the same pipeline without it, ROUGE-2 at equal length rose by 1.9 points on

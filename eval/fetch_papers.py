@@ -51,8 +51,11 @@ MAX_WORDS = 20000  # longer is usually a thesis or a review with a huge appendix
 # "1 Introduction", "1.Introduction", "I. INTRODUCTION", and small capitals as
 # pdftotext renders them ("I NTRODUCTION"). Journals without an introduction
 # heading often open with "Background" instead. Papers with neither are skipped.
+# Capitalised, so a table cell reading "background" is not taken for a heading.
 INTRO = re.compile(
-    r"^\s*(?:(?:\d+|[IVX]+)\s*\.?\s*)?(?:I\s?ntroduction|B\s?ackground(?:\s*&\s*Summary)?)\s*$", re.I | re.M
+    r"^\s*(?:(?:\d+|[IVX]+)\s*\.?\s*)?"
+    r"(?:I\s?(?:ntroduction|NTRODUCTION)|B\s?(?:ackground|ACKGROUND)(?:\s*&\s*Summary)?)\s*$",
+    re.M,
 )
 
 CACHE = HERE / ".cache" / "arxiv"
