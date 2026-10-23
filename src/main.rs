@@ -540,8 +540,13 @@ fn embed_cached(embedder: &embed::Embedder, texts: &[&str], batch_size: usize) -
             bytes.extend_from_slice(&x.to_le_bytes());
         }
     }
+    // Write then rename, so another process reading the cache at the same
+    // moment sees the whole file or none of it, never a prefix.
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(&path, bytes);
+    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
     Ok(vectors)
 }
 
