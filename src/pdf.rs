@@ -233,7 +233,7 @@ pub fn assemble(pages: &[Page], lines: Vec<Line>) -> String {
         ordered.extend(reading_order(pages[p], page_lines));
     }
     let paragraphs = drop_title_block(mark_headings(&ordered, drop_small_print(&ordered, paragraph_groups(&ordered))));
-    let joined = dehyphenate(&paragraphs);
+    let joined = dehyphenate(&join_broken_paragraphs(paragraphs));
     let mut out = joined.join("\n\n");
     out.push('\n');
     out
@@ -508,6 +508,30 @@ fn ends_sentence(s: &str) -> bool {
     s.ends_with(['.', '?', '!', ':'])
 }
 
+/// A paragraph that ends in a hyphenated word ("... diagnostics of tur-")
+/// continues in the next one ("bulence ..."): a column or page break fell
+/// inside it, and a figure or footnote between made two paragraphs of it.
+fn join_broken_paragraphs(paragraphs: Vec<Vec<String>>) -> Vec<Vec<String>> {
+    let mut out: Vec<Vec<String>> = Vec::with_capacity(paragraphs.len());
+    for p in paragraphs {
+        let continues = out.last().is_some_and(|prev: &Vec<String>| {
+            let end = prev.last().map(|l| l.trim_end()).unwrap_or("");
+            let start = p[0].trim_start();
+            !prev[0].starts_with('#')
+                && !start.starts_with('#')
+                && end.ends_with('-')
+                && end[..end.len() - 1].chars().last().is_some_and(char::is_alphabetic)
+                && start.chars().next().is_some_and(char::is_lowercase)
+        });
+        if continues {
+            out.last_mut().unwrap().extend(p);
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
 /// Join each paragraph's lines, rejoining words hyphenated at a line end.
 fn dehyphenate(paragraphs: &[Vec<String>]) -> Vec<String> {
     // Words the document writes with a hyphen inside a line, and every word
@@ -770,6 +794,14 @@ mod tests {
         assert_eq!(out[6], "## B.1 More Results");
         assert_eq!(out[7], "# Results");
         assert_eq!(out[8], "Domain", "a small label from a figure is not a heading");
+    }
+
+    #[test]
+    fn paragraphs_broken_inside_a_word_rejoin() {
+        let p = |t: &str| vec![t.to_string()];
+        let out = join_broken_paragraphs(vec![p("A more quantitative diagnostics of tur-"), p("bulence follows here."), p("# 3 Results"), p("next-")]);
+        assert_eq!(dehyphenate(&out)[0], "A more quantitative diagnostics of turbulence follows here.");
+        assert_eq!(out.len(), 3, "a heading never joins");
     }
 
     #[test]
