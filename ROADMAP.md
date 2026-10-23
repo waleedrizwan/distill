@@ -378,19 +378,29 @@ distill trailed plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
   a glossary, 51 entries, all 27 test-paper entries correct.
 - [ ] **From the document: other definitions** ("X is defined as", "we call
   X", "X refers to", "X, i.e. ..."). Not started.
-- [ ] **From a bundled dictionary.** For hard words the document never defines
-  (rare by a frequency list, not a name), give a short gloss from Open English
-  WordNet (CC BY 4.0, attributed). The sense is chosen by embedding similarity
-  between the sentence and each sense's gloss, and nothing is shown when no
-  sense clearly wins. Dictionary entries are labelled as such.
+- **From a bundled dictionary: dropped, gate missed.** Built and measured:
+  Open English WordNet 2025 (CC BY 4.0), filtered to the 51,000 single words
+  the MiniLM tokenizer splits into pieces (a sign of a rare word: "hysteresis"
+  yes, "protein" no); senses chosen by embedding similarity between the
+  sentence and each "word: definition", shown only with a margin of 0.03 over
+  the next sense and a similarity of at least 0.40 (tuned on the development
+  papers, where 27 of 32 entries were right after dropping adverbs and
+  circular definitions). On the test papers only 14 of 22 entries had the
+  right sense (64%, gate 80%), and a higher threshold did worse (58% at
+  0.45). WordNet lacks the technical senses papers use: "kinetics" got the
+  mechanics sense in a chemistry paper, "homology" the biological one for
+  persistent homology, "decarbonizing" an engine, "diagnostics" medicine,
+  "neuron" a nerve cell in a language-model paper. A domain dictionary, or
+  definitions the document itself gives, would be needed.
 - [x] Property tests and a `glossary` fuzz target: every definition and short
   form is the document's own text (whitespace collapsed, as distill holds
   sentences), and expanding only inserts definitions in front of short forms.
   Fuzzing found two real faults (a definition running into a bracket in the
   SF-first order; the span contract stated without the whitespace caveat).
-- [ ] **Gate (hand-read on the papers set):** at least 90% of document
-  definitions correct, and at least 80% of dictionary entries with the right
-  sense. If the dictionary part misses its gate, only the document part ships.
+- [x] **Gate (hand-read on the papers set):** at least 90% of document
+  definitions correct: met (98% and 100% on two samples of 100). At least 80%
+  of dictionary entries with the right sense: missed (64%), so as planned only
+  the document part ships.
 
 ## Milestone 11: plainer summaries (`--plain`)
 
