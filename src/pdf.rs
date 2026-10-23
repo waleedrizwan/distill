@@ -232,7 +232,7 @@ pub fn assemble(pages: &[Page], lines: Vec<Line>) -> String {
     for (p, page_lines) in by_page.into_iter().enumerate() {
         ordered.extend(reading_order(pages[p], page_lines));
     }
-    let paragraphs = drop_small_print(&ordered, paragraph_groups(&ordered));
+    let paragraphs = drop_title_block(mark_headings(&ordered, drop_small_print(&ordered, paragraph_groups(&ordered))));
     let joined = dehyphenate(&paragraphs);
     let mut out = joined.join("\n\n");
     out.push('\n');
@@ -243,7 +243,7 @@ pub fn assemble(pages: &[Page], lines: Vec<Line>) -> String {
 /// inside figures, tables. The abstract, which papers often set small too,
 /// is kept: the paragraphs after an "Abstract" heading, and one that opens
 /// with the word.
-fn drop_small_print(lines: &[Line], groups: Vec<Vec<usize>>) -> Vec<Vec<String>> {
+fn drop_small_print(lines: &[Line], groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
     let body = body_size(lines);
     let mut out = Vec::with_capacity(groups.len());
     let mut in_abstract = false;
@@ -267,9 +267,67 @@ fn drop_small_print(lines: &[Line], groups: Vec<Vec<usize>>) -> Vec<Vec<String>>
         if size < body * 0.92 && !abstract_text && !abstract_heading && !heading {
             continue;
         }
-        out.push(text);
+        out.push(g);
     }
     out
+}
+
+/// Authors, affiliations, emails and dates sit between a paper's title and
+/// its abstract. When the document has an "Abstract" heading early on, the
+/// plain paragraphs before it are dropped; headings (the title) stay.
+fn drop_title_block(paragraphs: Vec<Vec<String>>) -> Vec<Vec<String>> {
+    let is_abstract = |p: &Vec<String>| {
+        p.len() == 1 && p[0].trim_start_matches('#').trim().trim_end_matches([':', '.']).eq_ignore_ascii_case("abstract")
+    };
+    let Some(at) = paragraphs.iter().take(40).position(is_abstract) else { return paragraphs };
+    paragraphs.into_iter().enumerate().filter(|(i, p)| *i >= at || p[0].starts_with('#')).map(|(_, p)| p).collect()
+}
+
+/// Mark section headings in Markdown ("# 1 Introduction", "## 2.1 Data"), so
+/// segment does not have to guess them from short lines, which in a paper are
+/// as often labels inside figures and tables. A heading is a one-line
+/// paragraph, at most 12 words, without closing punctuation, that is
+/// numbered ("3", "3.2", "III.", "A."), a heading any paper uses ("Results",
+/// "References"), or set bold or larger than the body and capitalised.
+fn mark_headings(lines: &[Line], groups: Vec<Vec<usize>>) -> Vec<Vec<String>> {
+    static NUMBERED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let numbered = NUMBERED.get_or_init(|| {
+        regex::Regex::new(r"^((?:\d{1,2}(?:\.\d{1,2}){0,3}\.?)|(?:[IVX]{1,5}\.)|(?:[A-Z](?:\.\d{1,2}){0,3}\.?))\s+\p{Lu}").unwrap()
+    });
+    let body = body_size(lines);
+    groups
+        .into_iter()
+        .map(|g| {
+            let text: Vec<String> = g.iter().map(|&i| lines[i].text.clone()).collect();
+            if g.len() != 1 {
+                return text;
+            }
+            let l = &lines[g[0]];
+            let t = l.text.trim();
+            let words = t.split(' ').count();
+            let letters = t.chars().filter(|c| c.is_alphabetic()).count();
+            if words > 12 || letters < 3 || t.ends_with(['.', ',', ';', ':']) || t.len() > 100 {
+                return text;
+            }
+            // Appendix letters ("A Sampling Details", "B.1 Data") but not
+            // initials ("A. Baker and B. Miller, Department of ...").
+            let lettered = |c: &regex::Captures| c[1].starts_with(|ch: char| ch.is_ascii_uppercase());
+            let level = if let Some(c) = numbered.captures(t).filter(|c| !(lettered(c) && t.contains(','))) {
+                c[1].trim_end_matches('.').split('.').count()
+            } else if crate::segment::is_known_heading(t) {
+                1
+            } else if (l.bold || l.size > body * 1.1)
+                && l.size >= body * 0.92
+                && words <= 10
+                && t.chars().next().is_some_and(char::is_uppercase)
+            {
+                2
+            } else {
+                return text;
+            };
+            vec![format!("{} {t}", "#".repeat(level.min(4)))]
+        })
+        .collect()
 }
 
 /// Text that repeats near the top or bottom edge of many pages, and page numbers.
@@ -658,10 +716,60 @@ mod tests {
         }
         push("Figure 1: A caption set smaller than the body text.", 8.0, &mut lines);
         let groups = paragraph_groups(&lines);
-        let kept: Vec<String> = drop_small_print(&lines, groups).into_iter().map(|p| p.join(" ")).collect();
+        let kept: Vec<String> = drop_small_print(&lines, groups)
+            .into_iter()
+            .map(|g| g.iter().map(|&i| lines[i].text.as_str()).collect::<Vec<_>>().join(" "))
+            .collect();
         assert!(kept.iter().any(|p| p.contains("We study things")), "{kept:?}");
         assert!(!kept.iter().any(|p| p.starts_with("Figure 1")), "{kept:?}");
         assert_eq!(kept.join(" ").matches("Body text").count(), 6);
+    }
+
+    #[test]
+    fn title_block_dropped_before_the_abstract() {
+        let p = |t: &str| vec![t.to_string()];
+        let paras = vec![p("# A Paper About Bread"), p("A. Baker and B. Miller, Department of Food Science"),
+            p("baker@example.org"), p("# Abstract"), p("We study bread."), p("# 1 Introduction")];
+        let out: Vec<String> = drop_title_block(paras).into_iter().map(|p| p.join(" ")).collect();
+        assert_eq!(out, ["# A Paper About Bread", "# Abstract", "We study bread.", "# 1 Introduction"]);
+        // No abstract heading: nothing to go by, nothing dropped.
+        let paras = vec![p("# Title"), p("Some author line here."), p("# 1 Introduction")];
+        assert_eq!(drop_title_block(paras).len(), 3);
+    }
+
+    #[test]
+    fn headings_marked() {
+        let mut lines = Vec::new();
+        let mut y = 760.0;
+        for (t, size, bold) in [
+            ("A Paper About Bread", 16.0, true),
+            ("A. Baker and B. Miller, Department of Food Science", 11.0, false),
+            ("1 Introduction", 10.0, true),
+            ("Bread is old and people like it a great deal, so we study it here.", 10.0, false),
+            ("2.1 Flours", 10.0, false),
+            ("A Sampling Details", 10.0, false),
+            ("B.1 More Results", 10.0, false),
+            ("Results", 10.0, false),
+            ("Domain", 7.0, false),
+        ] {
+            let mut l = line(0, 72.0, y, 200.0, t);
+            l.size = size;
+            l.bold = bold;
+            lines.push(l);
+            y -= 40.0;
+        }
+        let groups: Vec<Vec<usize>> = (0..lines.len()).map(|i| vec![i]).collect();
+        let out: Vec<String> = mark_headings(&lines, groups).into_iter().map(|p| p.join(" ")).collect();
+        // "A" could be an appendix letter; either way the title is a heading.
+        assert_eq!(out[0], "# A Paper About Bread");
+        assert_eq!(out[1], "A. Baker and B. Miller, Department of Food Science");
+        assert_eq!(out[2], "# 1 Introduction");
+        assert!(!out[3].starts_with('#'));
+        assert_eq!(out[4], "## 2.1 Flours");
+        assert_eq!(out[5], "# A Sampling Details");
+        assert_eq!(out[6], "## B.1 More Results");
+        assert_eq!(out[7], "# Results");
+        assert_eq!(out[8], "Domain", "a small label from a figure is not a heading");
     }
 
     #[test]

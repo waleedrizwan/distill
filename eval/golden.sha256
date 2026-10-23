@@ -30,4 +30,4 @@ c6bc6daa6937fb288d64a2a93697a785bf8d73b96ae44150a65b33bd8a6c65f1  samples/two-co
 d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --compress --words 150
 d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --simplify --compress --words 150
 d9edd52ff04f9604d8d2f59267d4c27f869b2142be76cd6904ba376a879d0b1f  samples/two-column-paper.pdf --split --compress --simplify --words 150
-be2a70ada13a2ab23b2c0d37450c840e9fc1d16728a78689baa472e598ff7ff9  samples/two-column-paper.pdf --extract-text
+08dfecb3b40cbbd91eed2e065103ce44acdd69c70ab5e72f6b3ba74cfc8c204c  samples/two-column-paper.pdf --extract-text

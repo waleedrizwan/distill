@@ -63,6 +63,9 @@ pub struct Params {
     /// Words each sentence will occupy in the output, by sentence index, when
     /// that differs from `Sentence::words` (compression). Word budget only.
     pub word_cost: Option<Vec<usize>>,
+    /// Pick this many sentences from every top-level section that has at least
+    /// two candidates, instead of sharing `budget` by section size.
+    pub per_section: Option<usize>,
 }
 
 impl Default for Params {
@@ -83,6 +86,7 @@ impl Default for Params {
             salience_weight: 0.0,
             want_features: false,
             word_cost: None,
+            per_section: None,
         }
     }
 }
@@ -446,7 +450,12 @@ pub fn select(doc: &Document, embeddings: &[Vec<f32>], p: &Params) -> Selection 
         })
         .collect();
     let total: f64 = weights.iter().sum();
-    let quota: Vec<f64> = weights.iter().map(|w| limit * w / total.max(1e-9)).collect();
+    let mut quota: Vec<f64> = weights.iter().map(|w| limit * w / total.max(1e-9)).collect();
+    let mut limit = limit;
+    if let Some(k) = p.per_section {
+        quota = (0..n_groups).map(|g| if members[g].len() >= 2 { k.min(members[g].len()) as f64 } else { 0.0 }).collect();
+        limit = quota.iter().sum();
+    }
     // `floor`: share every section is guaranteed. `cap`: most a section may take
     // before the remainder goes elsewhere. Under a sentence budget these are the
     // rounded-down and rounded-up quotas; under a word budget a section may run
@@ -905,6 +914,19 @@ mod tests {
         assert_ne!(sections[0], sections[1], "both picks from one section: {sections:?}");
         assert!(sel.groups.iter().any(|g| g.as_deref() == Some("Part A")));
         assert!(sel.groups.iter().any(|g| g.as_deref() == Some("Part B")));
+    }
+
+    #[test]
+    fn per_section_picks_from_every_section() {
+        // Section A is far larger, yet each section gets exactly two picks.
+        let a: String = (1..=8).map(|i| format!("Alpha topic sentence number {i} has plenty of words. ")).collect();
+        let b = "Beta subject line number one also has enough words. Beta subject line number two also has enough words. Beta subject line number three also has enough words.";
+        let doc = parse(&format!("# Part A\n\n{a}\n\n# Part B\n\n{b}\n"), &ParseOptions::default());
+        let e: Vec<Vec<f32>> = (0..11).map(|i| unit(&[1.0, i as f32 * 0.1, if i < 8 { 0.0 } else { 1.0 }])).collect();
+        let sel = select(&doc, &e, &Params { per_section: Some(2), repair: false, ..Default::default() });
+        let sections: Vec<usize> = selected(&sel).iter().map(|&i| doc.sentences[i].section).collect();
+        assert_eq!(sections.len(), 4, "{sections:?}");
+        assert_eq!(sections.iter().filter(|&&s| s == sections[0]).count(), 2);
     }
 
     #[test]

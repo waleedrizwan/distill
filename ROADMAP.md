@@ -313,12 +313,25 @@ judge PDF handling, structure or jargon.
 - Still junk: lines cut off by a display equation that happen to end the
   paragraph ("... can be calculated as"), table rows, reference entries in
   journals' own styles, figure text whose words run together.
-- [ ] `--by-section`: a short summary under each top-level heading, for
-  reading a paper section by section.
+- [x] **Headings marked in PDFs.** Short lines inside figures and tables were
+  taken for section headings ("BASE", "Embedding0.4 Cosine Similarity0.6"),
+  which split section budgets across fake sections. `src/pdf.rs` now marks
+  headings in Markdown when a one-line paragraph is numbered ("3.2",
+  "III.", appendix "B.1"), a heading every paper uses, or bold or large and
+  capitalised; segment stops guessing headings from bare short lines in a
+  document that marks at least two. The title block (authors,
+  affiliations, emails) before an "Abstract" heading is dropped.
+  ROUGE-2 +0.45 test, +0.48 development (not significant alone); other
+  sets unchanged.
+- [x] `--by-section[=N]`: N sentences (default 2) from every top-level
+  section with at least two candidates, under its heading.
+- [x] **Gate met.** Both parts against the Milestone 9 baselines at reference
+  length: papers test +1.11 (95% CI +0.01 to +2.19), development +0.86
+  (-0.08 to +1.82), the 60 papers pooled +0.98 (+0.23 to +1.72). distill
+  is now ahead of centroid on both sets and 0.6 behind the first sentences on
+  the test papers.
 - [ ] Bold run-in paragraph headings ("Prefix Tuning Prefix Tuning, as
   introduced in ...") split off.
-- [ ] **Gate:** papers ROUGE-2 up significantly at reference length. Not
-  met yet (+0.52 pooled, not significant).
 
 ## Milestone 9: long-document ranking
 
