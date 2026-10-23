@@ -453,3 +453,48 @@ distill trailed plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
 **Order and scope for the first session:** Milestones 5 to 9 are expected to
 land. Milestones 10 to 12 are worked in order as time allows; anything
 unfinished stays here, unticked, with notes.
+
+## Part 2 status (2026-10-23)
+
+Landed, each as its own pull request with its numbers (#12 to #23):
+Milestones 5, 6, 7, 9, 11 and 12 complete; 8 and 10 met their gates with
+items left open (below). Reference length, ROUGE-2, distill before Part 2 ->
+now:
+
+| Set | lead | centroid | before | now | now with `--plain` |
+|---|---|---|---|---|---|
+| news (test) | 8.9 | 7.3 | 9.4 | 9.4 | |
+| bills (test) | 19.7 | 16.2 | 20.6 | 20.6 | |
+| GovReport (test) | 13.7 | 22.5 | 19.0 | 22.5 | |
+| GovReport (dev) | 13.4 | 24.5 | 19.3 | 23.8 | |
+| papers (test) | 10.8 | 9.4 | 8.2 | 10.6 | 11.0 (FK 13.8 -> 10.8) |
+| papers (dev) | 7.3 | 9.0 | 8.4 | 10.0 | 9.8 (FK 13.1 -> 10.2) |
+
+("Before" for papers is the first measurement with distill's own PDF reader,
+Milestone 7; with `pdftotext` it was 8.1 and 8.7.)
+
+Still open, in the order I would take them:
+
+1. **Display equations in PDFs.** The commonest junk left in paper
+   summaries is a sentence cut off where a display equation begins ("...
+   can be calculated as"). Joining the text either side of an equation, or
+   dropping the lead-in, needs the equation recognised in `src/pdf.rs`
+   (centred, symbol-dense lines).
+2. **Bold run-in paragraph headings** ("Prefix Tuning Prefix Tuning, as
+   introduced in ...") split off (Milestone 8).
+3. **Other in-document definitions** ("X is defined as", "we call X", "X
+   refers to"), with the same hand-read gate as the abbreviations
+   (Milestone 10).
+4. **Retrain the salience head** with reports and papers, now that the PDF
+   reader gives clean paper text (Milestone 9). GovReport development is
+   0.7 behind centroid, and papers may gain more.
+5. **Academic vocabulary in `src/lexicon.tsv`** (Milestone 11): `--simplify`
+   still rarely fires on papers; this needs a hand review of SimplePPDB
+   candidates.
+6. A licence for the repository: there is no LICENSE file, and the bundled
+   data (SimplePPDB, CC BY 3.0 US) is attributed in the README.
+
+Tried and dropped, with reasons in the milestones above: skipping all text
+after a paper's reference list; requiring every sentence to end with a full
+stop; `backward` 0.65 for long documents; and WordNet glosses for hard
+words (64% right on the test papers against an 80% gate).
