@@ -114,11 +114,12 @@ ahead with MiniLM as the frozen encoder.
   significant). distill now beats the first-sentences baseline at equal length
   on all three test sets.
 
-Follow-up found while reading output: the sentence splitter breaks
-multi-sentence quotations, so a pick can open with an unclosed quote mark
-("I just let frustration get the better of me."). The head is more willing than
-centrality to pick such fragments. Keeping quotations whole in
-`src/segment.rs`, or an unbalanced-quote feature, would fix it.
+- [x] Follow-up found while reading output: the sentence splitter broke
+  multi-sentence quotations, so a pick could open with an unclosed quote mark
+  ("I just let frustration get the better of me."). The head is more willing
+  than centrality to pick such fragments. Fixed in `src/segment.rs` (PR #11): a
+  closed quotation of up to 60 words stays one sentence. No clear ROUGE change
+  on any development set.
 
 ## Milestone 4: simplifier, three opt-in layers
 
@@ -193,3 +194,146 @@ that can reorder meaning.
 If length normalisation and the dangling-sentence changes beat lead-3 on news by
 a clear margin at equal length, Milestone 2 becomes optional and Milestone 4 can
 start in parallel. (Not met; see Milestone 1.)
+
+# Part 2: understand hard text without an LLM
+
+The first roadmap made distill a good extractive summarizer of news and bills.
+The goal now is the one it was built for: take any text, especially a research
+paper full of jargon, and make it shorter **and easier to understand**, locally,
+for free, with no LLM.
+
+Ground rules for Part 2 (agreed 2026-10-22):
+
+- **No LLM, no paid service.** Anything bundled must be free to redistribute.
+- **No invented words in the summary body.** Sentences stay the source's
+  (with the opt-in Milestone 4 layers). Explanations come from the document
+  itself or from a fixed, bundled, attributed dictionary, and are shown in a
+  labelled glossary, never mixed into the sentences.
+- **Determinism is kept where it is cheap** (golden hashes, 1 vs 4 threads) but
+  is no longer allowed to block a useful feature; any loss is stated.
+- **Network only when the argument is a URL** (Milestone 12). Every other path
+  stays offline.
+- **Primary platform: macOS on Apple Silicon.** Linux stays green in CI.
+- **One branch and pull request per change**, merged after CI passes. Ranking
+  changes carry the before/after table; changes judged by reading carry the
+  read-through counts.
+- **Measures.** ROUGE on every set (nothing may regress significantly), plus a
+  new papers set, a readability score, and hand-read precision for anything
+  ROUGE cannot see.
+
+## Milestone 5: housekeeping
+
+- [x] Regenerate `eval/baseline.json`, `eval/dev-baseline.json` and the README
+  test table. PR #11 changed segmentation after they were recorded; news distill
+  ROUGE-2 at reference length moved from 9.6 to 9.4 (95% CI -0.87 to +0.37,
+  not significant), the other sets by 0.1 or less.
+- [x] Tick the quotation follow-up under Milestone 3 (done in PR #11).
+- [x] Accelerate is now on by default for macOS builds (target-specific
+  dependency features). On an M4 it embeds a 9,400-word report in 1.4 s instead
+  of 2.9 s; all golden hashes and every eval cell are unchanged. README says
+  where it is developed and tested.
+
+## Milestone 6: a papers evaluation set (gate for everything below)
+
+The arXiv set has 10 documents, lowercased and pre-tokenised, so it cannot
+judge PDF handling, structure or jargon.
+
+- [ ] `eval/papers.tsv`: about 30 open-access arXiv papers across fields (ML,
+  biology, physics, economics, maths, social science), pinned by arXiv ID
+  and version, with the SHA-256 of each PDF. `fetch_data.py` downloads them
+  and their abstracts from the arXiv API. The PDFs are not committed.
+- [ ] Reference summary = the abstract. Input = the paper with its abstract
+  removed. Text comes from `pdftotext` at first, and from Milestone 7 once it
+  exists.
+- [ ] `score.py` gains a readability column: Flesch-Kincaid grade of the
+  summary, and the share of its words outside the 20,000 most frequent English
+  words. Lower is plainer.
+- [ ] Baseline table for lead, centroid and distill on `papers`, in the README.
+
+## Milestone 7: native PDF input
+
+- [ ] `distill paper.pdf` works directly: the input is detected by its `%PDF`
+  header, so no `pdftotext` is needed.
+- [ ] Bake-off of pure-Rust extractors (`pdf-extract`, `pdf_oxide`), each
+  wrapped so a panic in the parser becomes an error, not a crash.
+  **Gate:** median token-level F1 against `pdftotext` of at least 0.97 on the
+  papers set, no crashes, and papers ROUGE-2 within 0.3 of the `pdftotext` path.
+  If neither passes, fall back to calling `pdftotext` when it is installed, and
+  say so.
+- [ ] Clean-up: rejoin hyphenated words, remove running headers, footers and
+  page numbers, and rejoin text that two-column layouts and line breaks split.
+  The tests use fixture PDFs.
+
+## Milestone 8: paper structure
+
+- [ ] Recognise the title block (authors, affiliations, emails), abstract,
+  section headings, references, acknowledgements, figure and table captions,
+  and equation or symbol-heavy lines. Only prose becomes a candidate. The
+  abstract stays a candidate in normal use and is removed in the eval.
+- [ ] `--by-section`: a short summary under each top-level heading, for
+  reading a paper section by section.
+- [ ] **Gate:** papers ROUGE-2 up significantly at reference length, no
+  significant drop on any other development set, and goldens updated only with
+  an explanation.
+
+## Milestone 9: long-document ranking
+
+distill trails plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
+5.2 (development). Papers are long too.
+
+- [ ] Try, one at a time and measured on development data: centrality that
+  depends on document length (less pull toward early text in long documents);
+  a salience weight that depends on length; pseudo-sections for text with no
+  headings (cut where the embeddings change most, as TextTiling does); and
+  retraining the salience head with GovReport and arXiv training documents
+  added.
+- [ ] **Gate:** govreport-dev ROUGE-2 +2.0 or more at reference length
+  (significant), papers not worse, and news and bills development sets not
+  significantly worse. Approaches that fail are written up as dropped.
+
+## Milestone 10: jargon glossary (`--glossary`)
+
+- [ ] **From the document.** Find definitions the source gives: acronyms
+  ("log-likelihood ratio (LLR)", "LLR (log-likelihood ratio)"), "X is defined
+  as", "we call X", "X refers to", "X, i.e. ...", and "X, a ...". When the
+  summary uses a term whose definition it does not contain, a glossary under
+  the summary gives the definition verbatim. `--expand-acronyms` instead writes
+  the first use as "log-likelihood ratio (LLR)", using only the source's words.
+- [ ] **From a bundled dictionary.** For hard words the document never defines
+  (rare by a frequency list, not a name), give a short gloss from Open English
+  WordNet (CC BY 4.0, attributed). The sense is chosen by embedding similarity
+  between the sentence and each sense's gloss, and nothing is shown when no
+  sense clearly wins. Dictionary entries are labelled as such.
+- [ ] Property test: every glossary entry from the document is a verbatim span
+  of it.
+- [ ] **Gate (hand-read on the papers set):** at least 90% of document
+  definitions correct, and at least 80% of dictionary entries with the right
+  sense. If the dictionary part misses its gate, only the document part ships.
+
+## Milestone 11: plainer summaries (`--plain`)
+
+- [ ] A per-sentence difficulty score (length, rare-word rate, word length,
+  symbol and parenthesis density) as a ranking term, so that of two sentences
+  with similar content the plainer one wins.
+- [ ] `--plain` turns on the difficulty term plus `--compress`, `--split`,
+  `--simplify` and `--glossary`.
+- [ ] Grow `src/lexicon.tsv` for academic vocabulary by reviewing the most
+  frequent unreviewed SimplePPDB candidates in papers, with the same allow-list
+  process.
+- [ ] **Gate:** on papers at reference length, Flesch-Kincaid grade down by at
+  least 1.0 with ROUGE-2 down by no more than 0.5.
+
+## Milestone 12: browser extension and URLs
+
+- [ ] Extension: a settings toggle for plain mode and glossary; the glossary is
+  shown under the distilled text; the PDF reader gets "Summarize whole paper"
+  (section by section). The native host passes the new options through.
+  Checked in Chrome on one arXiv PDF and one news page.
+- [ ] `distill https://...`, opt-in by the argument: fetch the page (`ureq`,
+  already a dependency); PDFs go through Milestone 7, HTML through a simple
+  main-content extractor and then the boilerplate filter. arXiv `abs/` links
+  fetch the PDF. No other code path touches the network.
+
+**Order and scope for the first session:** Milestones 5 to 9 are expected to
+land. Milestones 10 to 12 are worked in order as time allows; anything
+unfinished stays here, unticked, with notes.

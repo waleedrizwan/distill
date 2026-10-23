@@ -16,11 +16,18 @@ regex = "1"
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 ureq = { version = "2", features = ["json"] }
 
+# Apple's Accelerate framework for the matrix maths on macOS: about 1.8x faster
+# embedding on an M4, and byte-identical output (eval/golden.sha256 matches).
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.11", features = ["accelerate"] }
+candle-nn = { version = "0.11", features = ["accelerate"] }
+candle-transformers = { version = "0.11", features = ["accelerate"] }
+
 [dev-dependencies]
 proptest = "1"
 
 [features]
-# Faster matrix maths. macOS: --features accelerate   Intel Linux/Windows: --features mkl
+# Faster matrix maths. On macOS Accelerate is always on (see above). Intel Linux/Windows: --features mkl
 accelerate = ["candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
 mkl = ["candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
 

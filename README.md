@@ -26,9 +26,10 @@ cargo build --release
 ./target/release/distill samples/apache-license.txt
 ```
 
-On Apple Silicon, `cargo build --release --features accelerate` uses Apple's
-Accelerate framework for the matrix maths. (Standard candle feature, but not
-tested here: this was built and tested on Linux.)
+On macOS the build uses Apple's Accelerate framework for the matrix maths
+automatically: on an M4 it embeds about twice as fast as the plain build, with
+byte-identical output. It is developed on macOS (Apple Silicon); CI also builds
+and tests on Linux, where `--features mkl` is the Intel equivalent.
 
 Input is plain text or Markdown, from a file or stdin. For PDFs, convert first:
 `pdftotext -layout paper.pdf - | distill --dehyphenate`.
@@ -133,18 +134,18 @@ the context sentences distill adds for readability count against the budget.
 
 | Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words |
 |---|---|---|---|---|---|---|
-| cnndm (n=100) | 3 sentences | lead | 29.4 | 12.3 | 21.0 | 65 |
-|  |  | centroid | 26.7 | 9.0 | 17.9 | 76 |
-|  |  | distill | **31.1** | **13.4** | **22.3** | **74** |
-|  | ref length (34 w) | lead | 27.5 | 8.9 | 19.4 | 34 |
-|  |  | centroid | 25.8 | 7.0 | 17.4 | 32 |
-|  |  | distill | **27.7** | **9.6** | **19.7** | **32** |
+| cnndm (n=100) | 3 sentences | lead | 29.4 | 12.3 | 21.1 | 66 |
+|  |  | centroid | 26.3 | 8.9 | 17.7 | 77 |
+|  |  | distill | **31.0** | **13.4** | **22.4** | **74** |
+|  | ref length (34 w) | lead | 27.5 | 8.9 | 19.4 | 33 |
+|  |  | centroid | 25.9 | 7.3 | 17.2 | 32 |
+|  |  | distill | **27.3** | **9.4** | **19.3** | **32** |
 | billsum (n=60) | 5 sentences | lead | 36.6 | 16.9 | 24.2 | 115 |
-|  |  | centroid | 38.1 | 17.1 | 23.5 | 236 |
+|  |  | centroid | 38.1 | 17.1 | 23.5 | 237 |
 |  |  | distill | **41.6** | **21.9** | **27.8** | **222** |
-|  | ref length (168 w) | lead | 42.9 | 19.7 | 27.4 | 166 |
-|  |  | centroid | 41.2 | 16.3 | 24.6 | 164 |
-|  |  | distill | **43.6** | **20.5** | **28.1** | **162** |
+|  | ref length (168 w) | lead | 42.8 | 19.7 | 27.4 | 166 |
+|  |  | centroid | 41.1 | 16.2 | 24.5 | 164 |
+|  |  | distill | **43.6** | **20.6** | **28.2** | **162** |
 | arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 |
 |  |  | centroid | 28.8 | 8.8 | 15.9 | 326 |
 |  |  | distill | **37.5** | **14.3** | **21.2** | **232** |
@@ -162,7 +163,7 @@ What this shows:
 
 - **News:** distill beats the first sentences, a famously strong baseline on
   news, without being told the text is news. At equal length the margin is
-  small (9.6 against 8.9 ROUGE-2). At three sentences it is larger, but partly
+  small (9.4 against 8.9 ROUGE-2). At three sentences it is larger, but partly
   because distill's sentences are longer.
 - **Bills:** at equal length distill is nearly a ROUGE-2 point ahead of the
   first sentences, and well ahead of plain centroid ranking.
