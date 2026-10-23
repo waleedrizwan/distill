@@ -49,6 +49,8 @@ distill [FILE]            summarize FILE (or stdin)
                           halves are full clauses
       --simplify          swap hard words for simpler ones from a reviewed table
                           ("numerous" -> "many"), only where meaning barely moves
+      --plain             easier reading: prefer plainer sentences, and turn on
+                          --compress, --split, --simplify, --glossary, --expand-acronyms
       --glossary          list the abbreviations the summary uses without spelling
                           out, with the document's own definitions
       --expand-acronyms   write the first such use as "log-likelihood ratio (LLR)"
@@ -328,6 +330,17 @@ tightened; in the summaries, about half get a glossary (33 of 60, 51
 entries), and every entry checked in the test papers' summaries was right.
 `--expand-acronyms` instead spells out the first use inside the sentence,
 which inserts the document's words into it.
+
+`--plain` is for reading something hard. Each sentence's Flesch-Kincaid
+grade becomes a ranking term (`src/readability.rs`, by rank within the
+document, weight 0.4), so of two sentences with similar content the plainer
+one wins; text that does not end like a sentence counts as hardest, so a
+short fragment is not mistaken for a plain sentence. It also turns on the
+layers above. On the papers at reference length it lowers the summaries'
+grade by about three (test 13.6 to 10.8, development 13.1 to 10.3) and
+their share of rare words (15.8% to 13.9% on test), at no significant ROUGE
+cost (ROUGE-2 +0.61 test, -0.07 development). The weight was chosen on the
+development papers: 0.6 and above cost ROUGE significantly.
 
 The salience weights are trained by `python3 eval/train_salience.py` on 3,000
 CNN/DailyMail and 1,500 BillSum training documents, none of which overlap the

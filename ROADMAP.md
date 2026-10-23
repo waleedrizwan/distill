@@ -404,16 +404,22 @@ distill trailed plain centroid ranking on GovReport by 3.5 ROUGE-2 (test) and
 
 ## Milestone 11: plainer summaries (`--plain`)
 
-- [ ] A per-sentence difficulty score (length, rare-word rate, word length,
-  symbol and parenthesis density) as a ranking term, so that of two sentences
-  with similar content the plainer one wins.
-- [ ] `--plain` turns on the difficulty term plus `--compress`, `--split`,
-  `--simplify` and `--glossary`.
+- [x] A per-sentence difficulty score as a ranking term
+  (`src/readability.rs`): the sentence's Flesch-Kincaid grade, by rank within
+  the document so a few extreme values do not squash the rest; text that does
+  not end like a sentence counts as hardest (otherwise short PDF fragments
+  win). Simpler than planned: rare-word rate and symbol density were not
+  needed to move the grade, and the grade is what the gate measures.
+- [x] `--plain` turns on the difficulty term (weight 0.4) plus `--compress`,
+  `--split`, `--simplify`, `--glossary` and `--expand-acronyms`. Weight
+  chosen on papers-dev: 0 (layers only) FK 13.08, 0.2 FK 11.35, 0.4 FK 10.25
+  (ROUGE-2 -0.07), 0.6 FK 9.57 (ROUGE-2 -0.87, significant), 1.0 FK 8.84.
 - [ ] Grow `src/lexicon.tsv` for academic vocabulary by reviewing the most
   frequent unreviewed SimplePPDB candidates in papers, with the same allow-list
   process.
-- [ ] **Gate:** on papers at reference length, Flesch-Kincaid grade down by at
-  least 1.0 with ROUGE-2 down by no more than 0.5.
+- [x] **Gate met.** Test papers at reference length: FK 13.64 -> 10.77,
+  Rare% 15.8 -> 13.9, ROUGE-2 +0.61 (95% CI -0.51 to +1.76).
+  Development papers: FK 13.14 -> 10.25, ROUGE-2 -0.07.
 
 ## Milestone 12: browser extension and URLs
 

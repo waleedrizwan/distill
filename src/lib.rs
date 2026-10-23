@@ -7,6 +7,7 @@ pub mod embed;
 pub mod glossary;
 pub mod lexical;
 pub mod pdf;
+pub mod readability;
 pub mod salience;
 pub mod segment;
 pub mod select;
