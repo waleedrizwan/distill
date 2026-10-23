@@ -24,6 +24,13 @@ Budgets
              which is the same rule distill applies. Context sentences that
              distill adds for readability are extra, so check the Words column.
 
+Readability
+  FK     Flesch-Kincaid grade of the summary (US school grade; lower is plainer),
+         with syllables counted by a vowel-group rule.
+  Rare%  share of the summary's words that are not among the 20,000 most
+         frequent words of the CNN/DailyMail training articles (eval/data/
+         cnndm-train.jsonl), i.e. everyday news English. Jargon shows up here.
+
 ROUGE is computed here with no stemming or stopword removal: lowercase
 alphanumeric tokens, F1 of unigram and bigram overlap, and F1 of the longest
 common subsequence over the whole summary. Numbers are comparable with each
@@ -43,8 +50,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-SENTENCES = {"cnndm": 3, "billsum": 5, "arxiv": 6, "govreport": 20}
-DEV_SETS = "cnndm-dev,billsum-dev,govreport-dev"
+SENTENCES = {"cnndm": 3, "billsum": 5, "arxiv": 6, "govreport": 20, "papers": 8}
+DEV_SETS = "cnndm-dev,billsum-dev,govreport-dev,papers-dev"
 METHODS = ["lead", "centroid", "distill"]
 CENTROID_FLAGS = [
     "--centrality", "centroid", "--lambda", "1", "--lead", "0", "--penalty", "0",
@@ -91,6 +98,48 @@ def rouge(system, reference):
         out[f"r{n}"] = f1(sum((sn & rn).values()), sum(sn.values()), sum(rn.values()))
     out["rl"] = f1(lcs(s, r), len(s), len(r))
     return out
+
+
+COMMON_SIZE = 20000
+_common = None
+
+
+def common_words():
+    """The 20,000 most frequent words of the news training articles."""
+    global _common
+    if _common is None:
+        path = HERE / "data" / "cnndm-train.jsonl"
+        if not path.exists():
+            sys.exit(f"{path.relative_to(ROOT)} is missing (needed for Rare%); run: python3 eval/fetch_data.py")
+        counts = Counter()
+        for line in path.read_text().splitlines():
+            if line.strip():
+                counts.update(re.findall(r"[a-z]+", json.loads(line)["text"].lower()))
+        # Ties broken alphabetically, so the list does not depend on file order.
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        _common = {w for w, _ in ranked[:COMMON_SIZE]}
+    return _common
+
+
+def syllables(word):
+    word = word.lower()
+    groups = re.findall(r"[aeiouy]+", word)
+    n = len(groups)
+    if word.endswith("e") and not word.endswith(("le", "ee", "ye")) and n > 1:
+        n -= 1
+    return max(1, n)
+
+
+def readability(sentences):
+    """(Flesch-Kincaid grade, share of rare words) of a list of sentences."""
+    words = [w for s in sentences for w in re.findall(r"[A-Za-z]+", s)]
+    if not words or not sentences:
+        return 0.0, 0.0
+    syl = sum(syllables(w) for w in words)
+    fk = 0.39 * len(words) / len(sentences) + 11.8 * syl / len(words) - 15.59
+    common = common_words()
+    rare = sum(1 for w in words if w.lower() not in common) / len(words)
+    return fk, rare
 
 
 def run(binary, args, text, env):
@@ -151,7 +200,8 @@ def score_doc(job):
     res = {}
     for m, sents in picks.items():
         summary = " ".join(sents)
-        res[m] = {**rouge(summary, doc["reference"]), "words": len(summary.split())}
+        fk, rare = readability(sents)
+        res[m] = {**rouge(summary, doc["reference"]), "words": len(summary.split()), "fk": fk, "rare": rare}
     res["reference"] = {"words": ref_words}
     return res
 
@@ -159,7 +209,8 @@ def score_doc(job):
 def load(set_name, limit):
     path = HERE / "data" / f"{set_name}.jsonl"
     if not path.exists():
-        sys.exit(f"{path.relative_to(ROOT)} is missing; run: python3 eval/fetch_data.py")
+        fetch = "fetch_papers.py" if set_name.startswith("papers") else "fetch_data.py"
+        sys.exit(f"{path.relative_to(ROOT)} is missing; run: python3 eval/{fetch}")
     docs = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     return docs[:limit] if limit else docs
 
@@ -179,7 +230,7 @@ def bootstrap(diffs, n=2000, seed=0):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bin", default=str(ROOT / "target" / "release" / "distill"))
-    ap.add_argument("--sets", default="cnndm,billsum,arxiv,govreport", help=f"comma-separated; tune on {DEV_SETS}")
+    ap.add_argument("--sets", default="cnndm,billsum,arxiv,govreport,papers", help=f"comma-separated; tune on {DEV_SETS}")
     ap.add_argument("--budget", choices=["sentences", "words", "both"], default="both")
     ap.add_argument("--limit", type=int, default=0, help="score only the first N documents per set")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
@@ -204,7 +255,11 @@ def main():
 
     table = {}
     per_doc = {}
-    rows = ["| Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words |", "|---|---|---|---|---|---|---|"]
+    common_words()  # build once, before the worker threads start
+    rows = [
+        "| Set | Budget | Method | ROUGE-1 | ROUGE-2 | ROUGE-L | Words | FK | Rare% |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
     for set_name in [s for s in args.sets.split(",") if s]:
         docs = load(set_name, args.limit)
         for budget in budgets:
@@ -215,21 +270,21 @@ def main():
             label = f"{SENTENCES[base(set_name)]} sentences" if budget == "sentences" else f"ref length ({ref_words:.0f} w)"
             for i, m in enumerate(METHODS):
                 key = f"{set_name}/{budget}/{m}"
-                cell = {k: mean([r[m][k] for r in results]) for k in ("r1", "r2", "rl", "words")}
-                cell = {k: v * 100 if k != "words" else v for k, v in cell.items()}
+                cell = {k: mean([r[m][k] for r in results]) for k in ("r1", "r2", "rl", "words", "fk", "rare")}
+                cell = {k: v * 100 if k not in ("words", "fk") else v for k, v in cell.items()}
                 table[key] = cell
                 per_doc[key] = [round(r[m]["r2"] * 100, 3) for r in results]
                 old = before.get(key)
 
                 def fmt(k, digits=1):
                     v = f"{cell[k]:.{digits}f}"
-                    if old is not None:
+                    if old is not None and k in old:
                         v += f" ({cell[k] - old[k]:+.{digits}f})"
                     return f"**{v}**" if m == "distill" else v
 
                 head = f"{set_name} (n={len(docs)})" if (i == 0 and budget == budgets[0]) else ""
                 rows.append(
-                    f"| {head} | {label if i == 0 else ''} | {m} | {fmt('r1')} | {fmt('r2')} | {fmt('rl')} | {fmt('words', 0)} |"
+                    f"| {head} | {label if i == 0 else ''} | {m} | {fmt('r1')} | {fmt('r2')} | {fmt('rl')} | {fmt('words', 0)} | {fmt('fk')} | {fmt('rare')} |"
                 )
             print(f"scored {set_name} / {budget}", file=sys.stderr)
 
