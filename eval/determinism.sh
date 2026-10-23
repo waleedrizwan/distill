@@ -22,17 +22,12 @@ mode=${1:-check}
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1; else sha256sum | cut -d' ' -f1; fi; }
 
 hashes() { # threads
-  for f in samples/*.txt samples/*.pdf; do
+  for f in samples/*.txt; do
     for m in "${MODES[@]}"; do
       # shellcheck disable=SC2086
       h=$(env -u DISTILL_CACHE RAYON_NUM_THREADS="$1" "$BIN" $m "$f" | sha)
       printf '%s  %s %s\n' "$h" "$f" "${m:-(defaults)}"
     done
-  done
-  # The text a PDF is read as, before any summarizing.
-  for f in samples/*.pdf; do
-    h=$("$BIN" --extract-text "$f" | sha)
-    printf '%s  %s %s\n' "$h" "$f" "--extract-text"
   done
 }
 

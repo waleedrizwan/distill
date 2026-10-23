@@ -198,8 +198,7 @@ pub fn parse(raw: &str, opts: &ParseOptions) -> Document {
         .filter_map(|bl| bl[0].chars().find(|c| c.is_alphabetic()).map(char::is_lowercase))
         .collect();
     b.check_fragments = starts.iter().filter(|&&lower| lower).count() * 2 <= starts.len();
-    // A document that marks its headings (Markdown, or a PDF as read by
-    // src/pdf.rs) has them all marked: a bare short line is then a label from
+    // A document that marks its headings in Markdown has them all marked: a bare short line is then a label from
     // a figure or a table, not a heading.
     let marked_headings = blocks.iter().filter(|bl| re_md_heading().is_match(&bl[0])).count() >= 2;
     let n = blocks.len();

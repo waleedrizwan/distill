@@ -1,27 +1,12 @@
 ```
-                            ┌──────────────────────────── ENTRY POINTS ────────────────────────────┐
-                            │                                                                      │
-   distill FILE | stdin     │   distill https://...          Chrome extension (extension/*.js)     │
-   (.txt .md .html .pdf)    │   fetch() — the only time      highlight text / open a PDF           │
-            │               │   it uses the network                   │                            │
-            │               │   (arXiv abs/ → its PDF)                │ chrome.runtime.            │
-            │               │            │                            │ sendNativeMessage          │
-            │               │            │                            ▼                            │
-            │               │            │                  distill-host (src/bin/distill-host.rs) │
-            │               │            │                  4-byte length + JSON on stdin/stdout:  │
-            │               │            │                  {text | pdf(base64), plain, glossary}  │
-            │               │            │                  → runs the `distill` binary next to it │
-            └───────────────┴────────────┴──────────────────────────────┬──────────────────────────┘
-                                                                        │ raw bytes
-                                                                        ▼
- ╔══════════════════════════════════════════════════════════════════════════════════════════════════╗
- ║ 0. READ   pdf.rs (PDF)  /  html.rs (web page)  /  plain text as-is                               ║
- ║    PDF:  positioned lines → reading order (columns, bands), drop headers/footers/page numbers,   ║
- ║          footnotes, captions, author block; rejoin hyphenated words; mark headings as `# ...`    ║
- ║    HTML: keep <article>/<main>, drop scripts, menus, header/footer, asides, lists of links       ║
- ╚══════════════════════════════════════════════╤═══════════════════════════════════════════════════╝
-                                                │ clean text  (--extract-text stops here)
-                                                ▼
+          distill::distill(text) -> String          Distiller::new(model_dir)?.summarize(text, &opts)?
+          (loads the model, plain mode)             (load once, reuse; Options::plain() or ::default())
+                         │                                            │
+                         │        CLI: distill FILE | stdin  (thin wrapper over the same call)
+                         │                        │                   │
+                         └────────────────────────┼───────────────────┘
+                                                  │ text  (a PDF must be converted first, e.g. pdftotext)
+                                                  ▼
  ╔══════════════════════════════════════════════════════════════════════════════════════════════════╗
  ║ 1. SEGMENT   segment.rs                                                                          ║
  ║    headings ─┐                                                                                   ║
@@ -60,7 +45,7 @@
  ╚══════════════════════════════════════════════╤═══════════════════════════════════════════════════╝
                                                 │ picks (verbatim, in original order)
                                                 ▼
- ┌──────────────────────── OPTIONAL REWRITES (all on by --plain) ───────────────────────────────────┐
+ ┌───────────── PLAIN-LANGUAGE REWRITES (on in distill(text) and --plain) ──────────────────────────┐
  │  --compress   compress.rs  drop parentheticals, citations, "which/who" clauses, "However,"       │
  │               (runs before ranking so the word budget counts the shorter text)                   │
  │  --simplify   lexical.rs   swap words from the reviewed table (lexicon.tsv, "numerous"→"many");  │
@@ -68,15 +53,15 @@
  │  --split      split.rs     break at ", and" / ", but" / ";" when both halves are full clauses    │
  │  --expand-acronyms / --glossary   glossary.rs   use the document's own definitions               │
  │                                                                                                  │
- │  Invariant: every kept word comes from the input, in order. Nothing is generated.                │
+ │  No LLM: every word is from the input or the reviewed table. Nothing is generated.               │
  └──────────────────────────────────────────────┬───────────────────────────────────────────────────┘
                                                 ▼
                     ┌──────────────── OUTPUT ────────────────┐
                     │ text: headings + picks; sentences that │
                     │   were adjacent share a line, a new    │
                     │   line = text was skipped              │
-                    │ --json: positions, sections, scores    │
-                    │ extension: {"ok":true,"summary",...}   │
+                    │ Summary: positions, scores, rewrites   │
+                    │ --json: the same, from the CLI         │
                     └────────────────────────────────────────┘
                     Deterministic: same input + same binary = byte-identical output
 ```

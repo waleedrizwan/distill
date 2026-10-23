@@ -1,4 +1,5 @@
-use distill::{compress, embed, glossary, html, lexical, pdf, readability, salience, segment, select, split};
+use distill::pipeline::{self, Distiller, Length, Options};
+use distill::{glossary, lexical, select};
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -142,7 +143,7 @@ struct Args {
     #[arg(long)]
     json: bool,
 
-    /// Rejoin words hyphenated across line breaks (useful for PDF text)
+    /// Rejoin words hyphenated across line breaks (useful for text copied from a PDF)
     #[arg(long)]
     dehyphenate: bool,
 
@@ -153,11 +154,6 @@ struct Args {
     /// Print the detected sections and sentences instead of a summary
     #[arg(long)]
     show_segments: bool,
-
-    /// Print the input's text as distill reads it (for a PDF, the extracted
-    /// text in reading order) and exit
-    #[arg(long)]
-    extract_text: bool,
 
     /// Print counts and timings to stderr
     #[arg(short, long)]
@@ -218,20 +214,10 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run() -> Result<()> {
-    let mut args = Args::parse();
-    if args.plain {
-        args.compress = true;
-        args.split = true;
-        args.simplify = true;
-        args.glossary = true;
-        args.expand_acronyms = true;
-    }
+    let args = Args::parse();
     let t0 = Instant::now();
 
-    let url = args.file.as_deref().and_then(Path::to_str).filter(|s| s.starts_with("http://") || s.starts_with("https://"));
     let bytes = match args.file.as_deref() {
-        // The only place distill uses the network: an argument that is a URL.
-        Some(_) if url.is_some() => fetch(url.unwrap())?,
         Some(p) if p != Path::new("-") => std::fs::read(p).with_context(|| format!("reading {}", p.display()))?,
         _ => {
             let mut b = Vec::new();
@@ -239,33 +225,21 @@ fn run() -> Result<()> {
             b
         }
     };
-    // A PDF is turned into text with its own line joining and dehyphenation.
-    let raw = if pdf::is_pdf(&bytes) {
-        pdf::extract(&bytes).context("reading the PDF")?
-    } else if html::is_html(&bytes) {
-        html::to_text(&String::from_utf8_lossy(&bytes))
-    } else {
-        String::from_utf8_lossy(&bytes).into_owned()
-    };
-    if args.extract_text {
-        print!("{raw}");
-        return Ok(());
+    if bytes.starts_with(b"%PDF-") {
+        bail!("distill reads text only; convert the PDF first, e.g. `pdftotext -layout file.pdf -`");
     }
+    let raw = String::from_utf8_lossy(&bytes);
+    let opts = options(&args)?;
 
-    let doc = segment::parse(
-        &raw,
-        &segment::ParseOptions { min_words: args.min_words, dehyphenate: args.dehyphenate },
-    );
-
-    let abbreviations = glossary::abbreviations(&doc.sentences.iter().map(|s| s.text.as_str()).collect::<Vec<_>>());
-    if args.dump_abbreviations {
-        for a in &abbreviations {
-            println!("{}\t{}", a.short, a.long);
+    if args.dump_abbreviations || args.show_segments {
+        let doc = pipeline::parse(&raw, &opts);
+        if args.dump_abbreviations {
+            let texts: Vec<&str> = doc.sentences.iter().map(|s| s.text.as_str()).collect();
+            for a in glossary::abbreviations(&texts) {
+                println!("{}\t{}", a.short, a.long);
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
-
-    if args.show_segments {
         for (si, sec) in doc.sections.iter().enumerate() {
             if sec.sentences.is_empty() && sec.title.is_none() {
                 continue;
@@ -288,80 +262,14 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    let candidates: Vec<&segment::Sentence> = doc.sentences.iter().filter(|s| s.candidate).collect();
-    if candidates.is_empty() {
-        bail!("no usable sentences found in the input");
-    }
-
-    let budget = match (args.sentences, args.ratio) {
-        (Some(n), _) => n,
-        (None, Some(r)) => {
-            if !(r > 0.0 && r <= 1.0) {
-                bail!("--ratio must be between 0 and 1");
-            }
-            ((candidates.len() as f32 * r).round() as usize).max(1)
-        }
-        (None, None) => ((candidates.len() as f32 * 0.1).ceil() as usize).clamp(3, 15),
-    };
-
-    let model_dir = find_model(args.model_dir.as_deref())?;
     let t1 = Instant::now();
-    let embedder = embed::Embedder::load(&model_dir)?;
+    let distiller = Distiller::new(args.model_dir.as_deref())?;
     let t2 = Instant::now();
-    let texts: Vec<&str> = candidates.iter().map(|s| s.text.as_str()).collect();
-    let vectors = embed_cached(&embedder, &texts, args.batch_size)?;
+    let sum = distiller.summarize(&raw, &opts)?;
     let t3 = Instant::now();
+    let doc = &sum.doc;
+    let selection = &sum.selection;
 
-    // Defaults for lambda and backward that depend on the document's length.
-    let long = select::LengthDefaults::for_candidates(candidates.len());
-    let mut params = select::Params {
-        budget,
-        word_budget: args.words,
-        lambda: args.lambda.unwrap_or(long.lambda).clamp(0.0, 1.0),
-        lead: args.lead,
-        centrality: args.centrality,
-        backward: args.backward.unwrap_or(long.backward),
-        beta: args.beta.clamp(0.0, 1.0),
-        section_weight: args.section_weight.clamp(0.0, 1.0),
-        dependence_penalty: args.penalty,
-        summary_section_boost: args.boost.max(0.0),
-        repair: !args.no_repair,
-        salience: None,
-        salience_weight: args.salience.clamp(0.0, 1.0),
-        want_features: args.dump_features,
-        word_cost: None,
-        per_section: args.by_section.map(|k| k.max(1)),
-        plainness: if args.plain { args.plainness.max(0.0) } else { 0.0 },
-        difficulty: args.plain.then(|| doc.sentences.iter().map(|s| readability::difficulty(&s.text)).collect()),
-    };
-    // Compressed text per sentence (None = unchanged). Ranking still embeds the
-    // original sentence; only the output and the word budget use this.
-    let shortened: Vec<Option<String>> = if args.compress {
-        doc.sentences.iter().map(|s| compress::compress(&s.text)).collect()
-    } else {
-        vec![None; doc.sentences.len()]
-    };
-    if args.compress {
-        params.word_cost = Some(
-            doc.sentences
-                .iter()
-                .zip(&shortened)
-                .map(|(s, c)| c.as_deref().map(|t| t.split_whitespace().count()).unwrap_or(s.words))
-                .collect(),
-        );
-    }
-    let mut head_note = "salience head off";
-    if params.salience_weight > 0.0 {
-        match salience::Head::builtin() {
-            Some(h) if h.encoder == embedder.encoder() => {
-                params.salience = Some(std::sync::Arc::new(h));
-                head_note = "salience head on";
-            }
-            Some(_) => head_note = "salience head skipped: trained for a different model",
-            None => head_note = "salience head skipped: none built in",
-        }
-    }
-    let selection = select::select(&doc, &vectors, &params);
     if args.dump_features {
         #[derive(Serialize)]
         struct Row<'a> {
@@ -381,116 +289,18 @@ fn run() -> Result<()> {
                 features: f.iter().map(|x| format!("{x:.6e}").parse().unwrap_or(*x)).collect(),
             })
             .collect();
-        println!("{}", serde_json::to_string(&serde_json::json!({ "encoder": embedder.encoder(), "candidates": rows }))?);
+        let encoder = distiller.embedder().encoder();
+        println!("{}", serde_json::to_string(&serde_json::json!({ "encoder": encoder, "candidates": rows }))?);
         return Ok(());
     }
     let picks = &selection.picks;
-
-    // What each picked sentence will print as: compressed, then simplified.
-    let mut display: Vec<Option<String>> = shortened.clone();
-    let mut swaps_made: Vec<Vec<(String, String, f32)>> = vec![Vec::new(); doc.sentences.len()];
-    if args.simplify {
-        let base = |i: usize| display[i].clone().unwrap_or_else(|| doc.sentences[i].text.clone());
-        let mut jobs: Vec<(usize, String, Vec<lexical::Swap>)> = Vec::new();
-        for p in picks {
-            let text = base(p.index);
-            let c = lexical::candidates(&text);
-            if !c.is_empty() {
-                jobs.push((p.index, text, c));
-            }
-        }
-        // One embedding batch: each sentence, then each sentence with one swap.
-        let mut texts: Vec<String> = Vec::new();
-        for (_, text, c) in &jobs {
-            texts.push(text.clone());
-            for sw in c {
-                texts.push(lexical::apply(text, &[sw]));
-            }
-        }
-        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-        let vecs = if refs.is_empty() { Vec::new() } else { embedder.embed(&refs, args.batch_size)? };
-        let mut at = 0;
-        // (sentence index, text before swaps, swaps that passed with their similarity)
-        type Passed = (usize, String, Vec<(lexical::Swap, f32)>);
-        let mut combined: Vec<Passed> = Vec::new();
-        for (idx, text, c) in jobs {
-            let n = c.len();
-            let orig = &vecs[at];
-            let mut kept: Vec<(lexical::Swap, f32)> = Vec::new();
-            for (k, sw) in c.into_iter().enumerate() {
-                let sim = embed::dot(orig, &vecs[at + 1 + k]);
-                if sim >= args.simplify_threshold {
-                    kept.push((sw, sim));
-                }
-            }
-            at += 1 + n;
-            combined.push((idx, text, kept));
-        }
-        // Several swaps in one sentence must also pass together; otherwise
-        // keep only the single best one.
-        let mut multi: Vec<(usize, String)> = Vec::new();
-        for (idx, text, kept) in &combined {
-            if kept.len() > 1 {
-                multi.push((*idx, lexical::apply(text, &kept.iter().map(|(s, _)| s).collect::<Vec<_>>())));
-            }
-        }
-        let mut pair_texts: Vec<&str> = Vec::new();
-        for (idx, all) in &multi {
-            let text = &combined.iter().find(|(i, ..)| i == idx).expect("job").1;
-            pair_texts.push(text);
-            pair_texts.push(all);
-        }
-        let pair_vecs = if pair_texts.is_empty() { Vec::new() } else { embedder.embed(&pair_texts, args.batch_size)? };
-        for (idx, text, mut kept) in combined {
-            if kept.is_empty() {
-                continue;
-            }
-            if kept.len() > 1 {
-                let m = multi.iter().position(|(i, _)| *i == idx).expect("multi");
-                let sim = embed::dot(&pair_vecs[2 * m], &pair_vecs[2 * m + 1]);
-                if sim < args.simplify_threshold {
-                    // Strict '>' keeps the earliest swap on ties.
-                    let best = kept.iter().enumerate().fold(0, |b, (k, (_, s))| if *s > kept[b].1 { k } else { b });
-                    kept = vec![kept.swap_remove(best)];
-                }
-            }
-            display[idx] = Some(lexical::apply(&text, &kept.iter().map(|(s, _)| s).collect::<Vec<_>>()));
-            swaps_made[idx] = kept.into_iter().map(|(s, sim)| (s.from, s.to, (sim * 1e4).round() / 1e4)).collect();
-        }
-    }
-    if args.split {
-        for p in picks {
-            let text = display[p.index].clone().unwrap_or_else(|| doc.sentences[p.index].text.clone());
-            if let Some(parts) = split::split(&text) {
-                display[p.index] = Some(parts);
-            }
-        }
-    }
-    if args.expand_acronyms {
-        let order: Vec<usize> = picks.iter().map(|p| p.index).collect();
-        let texts: Vec<String> =
-            order.iter().map(|&i| display[i].clone().unwrap_or_else(|| doc.sentences[i].text.clone())).collect();
-        for (&i, new) in order.iter().zip(glossary::expand(&texts, &abbreviations)) {
-            if new != doc.sentences[i].text && display[i].as_deref() != Some(new.as_str()) {
-                display[i] = Some(new);
-            }
-        }
-    }
-    let shown = |i: usize| -> &str { display[i].as_deref().unwrap_or(&doc.sentences[i].text) };
-    let needed: Vec<&glossary::Abbreviation> = if args.glossary {
-        glossary::for_summary(&picks.iter().map(|p| shown(p.index)).collect::<Vec<_>>(), &abbreviations)
-    } else {
-        Vec::new()
-    };
-    let t4 = Instant::now();
-
-    let source_words: usize = doc.sentences.iter().map(|s| s.words).sum();
-    let summary_words: usize = picks.iter().map(|p| shown(p.index).split_whitespace().count()).sum();
+    let source_words = sum.source_words();
+    let summary_words = sum.summary_words();
 
     if args.json {
         let out = JsonOut {
             source_sentences: doc.sentences.len(),
-            candidate_sentences: candidates.len(),
+            candidate_sentences: sum.candidates,
             sections: doc.sections.iter().filter(|s| !s.sentences.is_empty()).count(),
             summary_words,
             source_words,
@@ -509,33 +319,28 @@ fn run() -> Result<()> {
                         rank: p.rank,
                         // Four decimals: enough to rank by, and stable against float noise.
                         score: (p.score * 1e4).round() / 1e4,
-                        text: shown(p.index),
-                        original: display[p.index].as_ref().map(|_| s.text.as_str()),
-                        substitutions: swaps_made[p.index].clone(),
+                        text: sum.shown(p.index),
+                        original: sum.rewritten(p.index).then_some(s.text.as_str()),
+                        substitutions: sum.substitutions[p.index].clone(),
                     }
                 })
                 .collect(),
-            glossary: needed
+            glossary: sum
+                .glossary
                 .iter()
                 .map(|a| JsonGloss { term: &a.short, definition: &a.long, source: "document" })
                 .collect(),
         };
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        print_text(&doc, &selection, !args.no_headings, &shown);
-        if !needed.is_empty() {
-            println!("\nGlossary");
-            for a in &needed {
-                println!("  {}: {}", a.short, a.long);
-            }
-        }
+        print!("{}", sum.to_text(!args.no_headings));
     }
 
     if args.verbose {
         eprintln!(
             "{} sentences ({} candidates) in {} sections -> {} selected + {} context; {} -> {} words ({:.0}%)",
             doc.sentences.len(),
-            candidates.len(),
+            sum.candidates,
             doc.sections.iter().filter(|s| !s.sentences.is_empty()).count(),
             picks.iter().filter(|p| p.kind == select::Kind::Selected).count(),
             picks.iter().filter(|p| p.kind == select::Kind::Context).count(),
@@ -543,166 +348,70 @@ fn run() -> Result<()> {
             summary_words,
             100.0 * summary_words as f32 / source_words.max(1) as f32
         );
-        if args.simplify {
-            let made: usize = swaps_made.iter().map(Vec::len).sum();
+        if opts.simplify {
+            let made: usize = sum.substitutions.iter().map(Vec::len).sum();
             eprintln!("simplify: {made} substitutions made ({} in the table)", lexical::table_size());
         }
-        let st = embedder.settings();
+        let st = distiller.embedder().settings();
         eprintln!(
-            "embedding model in {} ({:?} pooling, {} tokens{}), {head_note}",
-            model_dir.display(),
+            "embedding model in {} ({:?} pooling, {} tokens{}), {}",
+            distiller.model_dir().display(),
             st.pooling,
             st.max_tokens,
-            if st.prefix.is_empty() { String::new() } else { format!(", prefix {:?}", st.prefix) }
+            if st.prefix.is_empty() { String::new() } else { format!(", prefix {:?}", st.prefix) },
+            sum.salience_note
         );
         eprintln!(
-            "parse {:.0?}, model load {:.0?}, embed {:.0?}, select {:.0?}, total {:.0?}",
+            "read {:.0?}, model load {:.0?}, parse {:.0?}, embed {:.0?}, select {:.0?}, total {:.0?}",
             t1 - t0,
             t2 - t1,
-            t3 - t2,
-            t4 - t3,
-            t4 - t0
+            sum.parse_time,
+            sum.embed_time,
+            sum.select_time,
+            t3 - t0
         );
     }
     Ok(())
 }
 
-/// Sentences are printed in document order. Sentences that were adjacent in
-/// the source stay on one line; a new line means text was skipped in between.
-fn print_text<'a>(doc: &'a segment::Document, sel: &select::Selection, headings: bool, shown: &dyn Fn(usize) -> &'a str) {
-    let titled: std::collections::BTreeSet<usize> = sel
-        .picks
-        .iter()
-        .filter(|p| sel.groups[p.group].is_some())
-        .map(|p| p.group)
-        .collect();
-    let show_headings = headings && titled.len() >= 2;
-
-    let mut last_group: Option<usize> = None;
-    let mut last_index: Option<usize> = None;
-    let mut line = String::new();
-    let mut first_output = true;
-    for p in &sel.picks {
-        let s = &doc.sentences[p.index];
-        let new_group = last_group != Some(p.group);
-        let adjacent = last_index.map(|i| i + 1 == p.index).unwrap_or(false) && !new_group && !s.list_item;
-        if !adjacent && !line.is_empty() {
-            println!("{line}");
-            line.clear();
-        }
-        if new_group {
-            if show_headings {
-                if !first_output {
-                    println!();
-                }
-                if let Some(t) = &sel.groups[p.group] {
-                    println!("[{t}]");
-                }
+/// The command line's flags as library options.
+fn options(args: &Args) -> Result<Options> {
+    let length = match (args.sentences, args.ratio, args.words, args.by_section) {
+        (Some(n), ..) => Length::Sentences(n),
+        (_, Some(r), ..) => {
+            if !(r > 0.0 && r <= 1.0) {
+                bail!("--ratio must be between 0 and 1");
             }
-            last_group = Some(p.group);
+            Length::Ratio(r)
         }
-        first_output = false;
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(shown(p.index));
-        last_index = Some(p.index);
-    }
-    if !line.is_empty() {
-        println!("{line}");
-    }
-}
-
-/// Embeddings are a pure function of the sentence text, so they can be reused.
-/// Set DISTILL_CACHE to a folder to skip re-embedding an unchanged document.
-fn embed_cached(embedder: &embed::Embedder, texts: &[&str], batch_size: usize) -> Result<Vec<Vec<f32>>> {
-    let Some(dir) = std::env::var_os("DISTILL_CACHE").filter(|d| !d.is_empty()).map(PathBuf::from) else {
-        return embedder.embed(texts, batch_size);
+        (_, _, Some(w), _) => Length::Words(w),
+        (.., Some(k)) => Length::PerSection(k),
+        _ => Length::Auto,
     };
-    // FNV-1a over all sentence texts, seeded with the model's fingerprint so a
-    // different model never reuses another model's vectors.
-    let mut h: u64 = 0xcbf29ce484222325 ^ embedder.fingerprint();
-    for t in texts {
-        for b in t.bytes().chain(std::iter::once(0u8)) {
-            h ^= b as u64;
-            h = h.wrapping_mul(0x100000001b3);
-        }
-    }
-    let path = dir.join(format!("{h:016x}-{}.f32", texts.len()));
-    if let Ok(bytes) = std::fs::read(&path) {
-        let n = texts.len();
-        if n > 0 && bytes.len() % (4 * n) == 0 {
-            let dim = bytes.len() / (4 * n);
-            let flat: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
-            return Ok(flat.chunks(dim).map(|c| c.to_vec()).collect());
-        }
-    }
-    let vectors = embedder.embed(texts, batch_size)?;
-    let mut bytes = Vec::with_capacity(vectors.len() * vectors.first().map(|v| v.len()).unwrap_or(0) * 4);
-    for v in &vectors {
-        for x in v {
-            bytes.extend_from_slice(&x.to_le_bytes());
-        }
-    }
-    // Write then rename, so another process reading the cache at the same
-    // moment sees the whole file or none of it, never a prefix.
-    let _ = std::fs::create_dir_all(&dir);
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, &path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    Ok(vectors)
-}
-
-/// Download a page or a PDF. An arXiv abstract page ("arxiv.org/abs/ID")
-/// fetches the paper's PDF instead.
-fn fetch(url: &str) -> Result<Vec<u8>> {
-    const LIMIT: u64 = 64 << 20;
-    let url = match url.split_once("arxiv.org/abs/") {
-        Some((scheme_host, id)) => format!("{scheme_host}arxiv.org/pdf/{id}"),
-        None => url.to_string(),
+    let opts = Options {
+        length,
+        lambda: args.lambda,
+        lead: args.lead,
+        centrality: args.centrality,
+        backward: args.backward,
+        beta: args.beta,
+        section_weight: args.section_weight,
+        penalty: args.penalty,
+        boost: args.boost,
+        salience: args.salience,
+        repair: !args.no_repair,
+        prefer_plain: false,
+        plainness: args.plainness,
+        compress: args.compress,
+        simplify: args.simplify,
+        simplify_threshold: args.simplify_threshold,
+        split: args.split,
+        glossary: args.glossary,
+        expand_acronyms: args.expand_acronyms,
+        min_words: args.min_words,
+        dehyphenate: args.dehyphenate,
+        want_features: args.dump_features,
+        batch_size: args.batch_size,
     };
-    let resp = ureq::get(&url)
-        .timeout(std::time::Duration::from_secs(60))
-        .set("User-Agent", concat!("distill/", env!("CARGO_PKG_VERSION")))
-        .call()
-        .with_context(|| format!("fetching {url}"))?;
-    let mut bytes = Vec::new();
-    resp.into_reader().take(LIMIT).read_to_end(&mut bytes).with_context(|| format!("reading {url}"))?;
-    Ok(bytes)
-}
-
-fn find_model(explicit: Option<&Path>) -> Result<PathBuf> {
-    let mut tried: Vec<PathBuf> = Vec::new();
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(p) = explicit {
-        candidates.push(p.to_path_buf());
-    } else {
-        if let Ok(p) = std::env::var("DISTILL_MODEL") {
-            candidates.push(PathBuf::from(p));
-        }
-        candidates.push(PathBuf::from("model"));
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                candidates.push(dir.join("model"));
-                // target/release/distill -> project root
-                if let Some(root) = dir.parent().and_then(|d| d.parent()) {
-                    candidates.push(root.join("model"));
-                }
-            }
-        }
-        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-            candidates.push(PathBuf::from(home).join(".distill").join("model"));
-        }
-    }
-    for c in candidates {
-        if c.join("model.safetensors").is_file() && c.join("tokenizer.json").is_file() && c.join("config.json").is_file() {
-            return Ok(c);
-        }
-        tried.push(c);
-    }
-    bail!(
-        "embedding model not found. Run ./fetch-model.sh, or pass --model-dir.\nLooked in:\n{}",
-        tried.iter().map(|p| format!("  {}", p.display())).collect::<Vec<_>>().join("\n")
-    )
+    Ok(if args.plain { opts.with_plain() } else { opts })
 }
