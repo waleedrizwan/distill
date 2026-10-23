@@ -183,22 +183,22 @@ the context sentences distill adds for readability count against the budget.
 |  |  | distill | **43.6** | **20.6** | **28.2** | **162** | **14.7** | **4.2** |
 | arxiv (n=10) | 6 sentences | lead | 34.3 | 11.2 | 18.9 | 194 | 16.5 | 16.4 |
 |  |  | centroid | 28.8 | 8.8 | 15.9 | 326 | 21.3 | 20.2 |
-|  |  | distill | **37.5** | **14.3** | **21.2** | **232** | **18.4** | **19.4** |
+|  |  | distill | **33.8** | **11.6** | **19.1** | **272** | **19.1** | **20.6** |
 |  | ref length (142 w) | lead | 36.0 | 11.5 | 20.1 | 142 | 12.8 | 17.2 |
 |  |  | centroid | 36.0 | 10.9 | 21.5 | 140 | 15.8 | 20.0 |
-|  |  | distill | **39.1** | **13.5** | **21.8** | **139** | **14.9** | **19.8** |
+|  |  | distill | **36.2** | **12.6** | **20.8** | **139** | **15.3** | **21.6** |
 | govreport (n=30) | 20 sentences | lead | 44.6 | 13.2 | 17.9 | 530 | 17.2 | 6.2 |
 |  |  | centroid | 54.0 | 22.5 | 21.6 | 725 | 21.2 | 6.8 |
-|  |  | distill | **52.6** | **18.6** | **20.5** | **626** | **18.8** | **6.7** |
+|  |  | distill | **55.0** | **22.7** | **22.3** | **686** | **20.3** | **6.7** |
 |  | ref length (599 w) | lead | 46.3 | 13.7 | 18.0 | 598 | 16.6 | 6.3 |
 |  |  | centroid | 56.4 | 22.5 | 21.8 | 596 | 20.8 | 6.8 |
-|  |  | distill | **54.0** | **19.0** | **20.8** | **597** | **18.4** | **6.8** |
+|  |  | distill | **56.6** | **22.5** | **22.7** | **596** | **19.9** | **6.7** |
 | papers (n=30) | 8 sentences | lead | 34.7 | 10.6 | 17.9 | 200 | 17.2 | 14.2 |
 |  |  | centroid | 36.2 | 8.6 | 16.5 | 243 | 18.1 | 16.1 |
-|  |  | distill | **35.5** | **9.1** | **16.8** | **192** | **15.3** | **16.2** |
+|  |  | distill | **36.9** | **9.6** | **16.7** | **225** | **17.1** | **16.4** |
 |  | ref length (194 w) | lead | 35.5 | 10.4 | 17.4 | 194 | 14.4 | 14.1 |
 |  |  | centroid | 36.0 | 8.0 | 16.5 | 192 | 12.0 | 16.3 |
-|  |  | distill | **35.1** | **8.2** | **16.2** | **192** | **11.6** | **16.6** |
+|  |  | distill | **36.8** | **9.1** | **16.8** | **192** | **12.1** | **16.3** |
 
 What this shows:
 
@@ -211,19 +211,25 @@ What this shows:
 - **Papers:** distill is ahead too, although no papers were used for training.
   Ten documents is still too few to read much into, and the arXiv set is
   lowercased and pre-tokenised, which is not what the splitter was built for.
-- **Long government reports: distill loses.** On GovReport (reports of about
-  8,600 words, summaries of about 600) plain centroid ranking beats distill by
-  3.5 ROUGE-2 at equal length, and by 5.3 on the 100 development reports. The
-  summaries draw on the whole report, so the rule that favours sentences later
-  text repeats works against it, and the salience score, trained only on news
-  and bills, costs a little more. The reports also arrive as one block of text
-  with no headings or paragraphs, so section budgets have nothing to work with.
-- **Research papers: distill is not ahead yet.** On the 30 test papers at
-  equal length the first sentences of the introduction score best (10.4
-  ROUGE-2, against 8.2 for distill); on the 30 development papers plain
-  centroid ranking does (8.9, against 8.4). distill's picks are the plainest
-  of the three (Flesch-Kincaid grade 11.6, against 14.4 for the first
-  sentences). Part 2 of the roadmap works on this.
+- **Long government reports: level with plain centroid ranking.** On
+  GovReport (reports of about 8,600 words, summaries of about 600) distill
+  and centroid ranking both reach 22.5 ROUGE-2 at equal length (23.8 against
+  24.5 on the 100 development reports). Until the length-dependent defaults
+  (below) distill was 3.5 points behind: the summaries draw on the whole
+  report, and the rule that favours sentences later text repeats works
+  against that. The reports arrive as one block of text with no headings or
+  paragraphs, so section budgets have nothing to work with.
+- **Research papers: ahead of centroid, behind the first sentences.** On the
+  30 test papers at equal length the first sentences of the introduction
+  score best (10.4 ROUGE-2, against 9.1 for distill and 8.0 for centroid); on
+  the 30 development papers distill is ahead (9.2, against 8.9 and 7.2).
+  distill's picks are the plainest of the three (Flesch-Kincaid grade 12.1,
+  against 14.4 for the first sentences).
+- **The old arXiv set got worse at six sentences.** The 10 lowercased arXiv
+  papers drop from 14.3 to 11.6 ROUGE-2 at six sentences (significant),
+  though not at equal length (13.5 to 12.6, not significant). This is the
+  price of the length-dependent defaults, which the 60 PDF papers and the 130
+  reports favour.
 - **The learned salience score** is where most of the gain comes from. Against
   the same pipeline without it, ROUGE-2 at equal length rose by 1.9 points on
   the bills and 2.2 on the papers (both significant) and 0.4 on news (not
@@ -233,6 +239,16 @@ FK is the Flesch-Kincaid grade of the summary (lower is plainer) and Rare% the
 share of its words outside the 20,000 most frequent words of the news training
 articles, a rough measure of jargon. They describe the sentences chosen, not
 whether they are good ones.
+
+**Length-dependent defaults.** Short documents put the main point first, so
+the ranking counts later text that echoes a sentence more than earlier text
+(`--backward 0.3`), and keeps a fair amount of diversity (`--lambda 0.7`).
+Long documents are summarized from the whole text, where the direction works
+against the summary. So between 60 and 150 candidate sentences the defaults
+move to `--backward 1` (no direction) and `--lambda 0.9`. No development
+bill and only 17 of 500 news articles have 60 candidates, and their output is
+unchanged; every report and paper has more. Setting either flag explicitly
+overrides this.
 
 Knobs are tuned on separate development sets (500 CNN/DailyMail validation
 articles, 300 BillSum training bills, 100 GovReport validation reports and

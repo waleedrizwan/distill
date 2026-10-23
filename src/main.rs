@@ -36,9 +36,10 @@ struct Args {
     #[arg(short, long)]
     model_dir: Option<PathBuf>,
 
-    /// Relevance vs. diversity (1.0 = most central sentences, lower = less repetition)
-    #[arg(long, default_value_t = 0.7)]
-    lambda: f32,
+    /// Relevance vs. diversity (1.0 = most central sentences, lower = less
+    /// repetition). Default 0.7, rising to 0.9 for long documents
+    #[arg(long)]
+    lambda: Option<f32>,
 
     /// Bonus for sentences that open a section (0 disables)
     #[arg(long, default_value_t = 0.1)]
@@ -48,9 +49,10 @@ struct Args {
     #[arg(long, value_enum, default_value_t = select::Centrality::Directed)]
     centrality: select::Centrality,
 
-    /// Directed centrality: weight of similarity to earlier text (later text = 1)
-    #[arg(long, default_value_t = 0.3, allow_negative_numbers = true)]
-    backward: f32,
+    /// Directed centrality: weight of similarity to earlier text (later text =
+    /// 1). Default 0.3, rising to 1 (no direction) for long documents
+    #[arg(long, allow_negative_numbers = true)]
+    backward: Option<f32>,
 
     /// Directed centrality: ignore similarities below this point of the min..max range
     #[arg(long, default_value_t = 0.3)]
@@ -250,13 +252,15 @@ fn run() -> Result<()> {
     let vectors = embed_cached(&embedder, &texts, args.batch_size)?;
     let t3 = Instant::now();
 
+    // Defaults for lambda and backward that depend on the document's length.
+    let long = select::LengthDefaults::for_candidates(candidates.len());
     let mut params = select::Params {
         budget,
         word_budget: args.words,
-        lambda: args.lambda.clamp(0.0, 1.0),
+        lambda: args.lambda.unwrap_or(long.lambda).clamp(0.0, 1.0),
         lead: args.lead,
         centrality: args.centrality,
-        backward: args.backward,
+        backward: args.backward.unwrap_or(long.backward),
         beta: args.beta.clamp(0.0, 1.0),
         section_weight: args.section_weight.clamp(0.0, 1.0),
         dependence_penalty: args.penalty,

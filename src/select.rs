@@ -163,6 +163,38 @@ fn points_elsewhere(text: &str) -> bool {
     .is_match(text)
 }
 
+/// Defaults for the knobs that should change with document length.
+///
+/// Short documents (news, most bills) put the main point first and elaborate
+/// after it, so directed centrality, which counts later text more, finds it.
+/// Long documents (reports, papers) are summarized from the whole text, and
+/// there the direction works against the summary: on 100 GovReport
+/// development reports, `backward` 1 and `lambda` 0.9 gain 4.7 ROUGE-2.
+/// Between 60 and 150 candidate sentences the defaults move linearly from the
+/// short-document values to the long ones. Of the development documents, no
+/// bill and 17 of 500 news articles reach 60 (none reaches 100), while every
+/// report and paper does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LengthDefaults {
+    pub lambda: f32,
+    pub backward: f32,
+}
+
+impl LengthDefaults {
+    pub const SHORT: LengthDefaults = LengthDefaults { lambda: 0.7, backward: 0.3 };
+    pub const LONG: LengthDefaults = LengthDefaults { lambda: 0.9, backward: 1.0 };
+    const RAMP: (f32, f32) = (60.0, 150.0);
+
+    pub fn for_candidates(n: usize) -> LengthDefaults {
+        let t = ((n as f32 - Self::RAMP.0) / (Self::RAMP.1 - Self::RAMP.0)).clamp(0.0, 1.0);
+        let mix = |a: f32, b: f32| a + (b - a) * t;
+        LengthDefaults {
+            lambda: mix(Self::SHORT.lambda, Self::LONG.lambda),
+            backward: mix(Self::SHORT.backward, Self::LONG.backward),
+        }
+    }
+}
+
 /// Mean thresholded similarity to the other sentences in `members`, with
 /// similarity to later sentences weighted 1 and to earlier ones `backward`.
 /// Rescaled to 0..1 over `members`.
@@ -644,6 +676,16 @@ pub fn is_dangling(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn length_defaults_ramp() {
+        assert_eq!(LengthDefaults::for_candidates(0), LengthDefaults::SHORT);
+        assert_eq!(LengthDefaults::for_candidates(60), LengthDefaults::SHORT);
+        assert_eq!(LengthDefaults::for_candidates(150), LengthDefaults::LONG);
+        assert_eq!(LengthDefaults::for_candidates(5000), LengthDefaults::LONG);
+        let mid = LengthDefaults::for_candidates(105);
+        assert!((mid.backward - 0.65).abs() < 1e-6 && (mid.lambda - 0.8).abs() < 1e-6);
+    }
+
     use super::*;
 
     #[test]
