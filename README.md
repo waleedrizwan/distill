@@ -40,6 +40,7 @@ distill [FILE]            summarize FILE (or stdin)
   -n, --sentences N       number of sentences (default: ~10% of the document, 3 to 15)
   -r, --ratio R           or a fraction of the document, e.g. 0.05
   -w, --words N           or up to N words, context sentences included
+      --by-section[=N]    N sentences (default 2) under each top-level heading
       --json              sentence positions, sections and scores
       --show-segments     print how the text was split, without summarizing
       --compress          leave out asides: parentheticals, citations, "which"/"who"
@@ -99,7 +100,11 @@ the default stays the smallest and fastest. Times are for the 1,662-word bill in
    rejoined unless the document writes it hyphenated elsewhere or both halves
    are words it uses alone ("resource-constrained"). Paragraphs set smaller
    than the body text (captions, text inside figures, tables) are dropped,
-   except the abstract and small-capital headings.
+   except the abstract and small-capital headings. Headings are marked in
+   Markdown (`# 1 Introduction`, `## 2.1 Data`) when a one-line paragraph is
+   numbered, is a heading every paper uses, or is set bold or large, so
+   labels inside figures are not taken for sections. Authors, affiliations
+   and emails between the title and the "Abstract" heading are dropped.
 1. **Segment** (`src/segment.rs`). Detects headings (Markdown, numbered,
    ALL CAPS, `SEC. 2. TITLE.`, `12. Governing Law.`), paragraphs, lists and
    sentences. The sentence splitter is rule-based with abbreviation handling
@@ -199,12 +204,12 @@ the context sentences distill adds for readability count against the budget.
 |  | ref length (599 w) | lead | 46.3 | 13.7 | 18.0 | 598 | 16.6 | 6.3 |
 |  |  | centroid | 56.4 | 22.5 | 21.8 | 596 | 20.8 | 6.8 |
 |  |  | distill | **56.6** | **22.5** | **22.7** | **596** | **19.9** | **6.7** |
-| papers (n=30) | 8 sentences | lead | 34.5 | 10.5 | 18.0 | 200 | 17.2 | 14.2 |
-|  |  | centroid | 38.0 | 9.8 | 17.1 | 237 | 18.1 | 15.5 |
-|  |  | distill | **38.6** | **10.4** | **17.3** | **218** | **16.8** | **15.2** |
-|  | ref length (194 w) | lead | 35.5 | 10.7 | 17.6 | 194 | 14.3 | 14.3 |
-|  |  | centroid | 37.6 | 8.8 | 17.0 | 192 | 12.9 | 15.4 |
-|  |  | distill | **38.0** | **9.8** | **17.2** | **192** | **12.8** | **15.3** |
+| papers (n=30) | 8 sentences | lead | 34.5 | 10.6 | 18.0 | 197 | 17.0 | 14.2 |
+|  |  | centroid | 37.4 | 9.6 | 16.9 | 236 | 18.1 | 15.9 |
+|  |  | distill | **39.5** | **10.8** | **17.9** | **223** | **17.5** | **15.7** |
+|  | ref length (194 w) | lead | 35.7 | 10.8 | 17.8 | 194 | 14.3 | 14.4 |
+|  |  | centroid | 38.1 | 9.4 | 16.9 | 192 | 13.3 | 16.1 |
+|  |  | distill | **38.1** | **10.2** | **17.5** | **192** | **13.6** | **15.8** |
 
 What this shows:
 
@@ -225,12 +230,11 @@ What this shows:
   report, and the rule that favours sentences later text repeats works
   against that. The reports arrive as one block of text with no headings or
   paragraphs, so section budgets have nothing to work with.
-- **Research papers: ahead of centroid, behind the first sentences.** On the
-  30 test papers at equal length the first sentences of the introduction
-  score best (10.7 ROUGE-2, against 9.8 for distill and 8.8 for centroid); on
-  the 30 development papers centroid and distill are close (9.7 and 9.5)
-  and the first sentences far behind (7.3). distill's picks are plainer than
-  the first sentences (Flesch-Kincaid grade 12.8 against 14.4).
+- **Research papers: close to the first sentences, ahead of centroid.** On
+  the 30 test papers at equal length the first sentences of the introduction
+  score 10.8 ROUGE-2, distill 10.2 and centroid 9.4; on the 30 development
+  papers distill is ahead (10.0, against 9.0 and 7.3). distill's picks are
+  plainer than the first sentences (Flesch-Kincaid grade 13.6 against 14.3).
 - **The old arXiv set** (10 lowercased papers) lost 2.7 ROUGE-2 at six
   sentences to the length-dependent defaults (below), and is now at 13.7 at
   equal length, ahead of both baselines.

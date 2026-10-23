@@ -52,8 +52,9 @@ MAX_WORDS = 20000  # longer is usually a thesis or a review with a huge appendix
 # pdftotext renders them ("I NTRODUCTION"). Journals without an introduction
 # heading often open with "Background" instead. Papers with neither are skipped.
 # Capitalised, so a table cell reading "background" is not taken for a heading.
+# distill marks headings in Markdown ("# 1 Introduction"); pdftotext does not.
 INTRO = re.compile(
-    r"^\s*(?:(?:\d+|[IVX]+)\s*\.?\s*)?"
+    r"^\s*(?:#+\s*)?(?:(?:\d+|[IVX]+)\s*\.?\s*)?"
     r"(?:I\s?(?:ntroduction|NTRODUCTION)|B\s?(?:ackground|ACKGROUND)(?:\s*&\s*Summary)?)\s*$",
     re.M,
 )

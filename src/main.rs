@@ -31,6 +31,12 @@ struct Args {
     #[arg(short, long, conflicts_with_all = ["sentences", "ratio"])]
     words: Option<usize>,
 
+    /// Summarize section by section: N sentences (default 2; `--by-section=3`) under each
+    /// top-level heading, for reading a long document part by part
+    #[arg(long, value_name = "N", num_args = 0..=1, default_missing_value = "2", require_equals = true,
+          conflicts_with_all = ["sentences", "ratio", "words"])]
+    by_section: Option<usize>,
+
     /// Folder with config.json, tokenizer.json and model.safetensors
     /// [default: $DISTILL_MODEL, ./model, <binary folder>/model, ~/.distill/model]
     #[arg(short, long)]
@@ -270,6 +276,7 @@ fn run() -> Result<()> {
         salience_weight: args.salience.clamp(0.0, 1.0),
         want_features: args.dump_features,
         word_cost: None,
+        per_section: args.by_section.map(|k| k.max(1)),
     };
     // Compressed text per sentence (None = unchanged). Ranking still embeds the
     // original sentence; only the output and the word budget use this.
