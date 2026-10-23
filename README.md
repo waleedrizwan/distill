@@ -10,7 +10,7 @@ sentences from a document and prints them **verbatim**, in their original order.
   only from a fixed, hand-reviewed table (`src/lexicon.tsv`). With `--split`,
   a long sentence can become two, losing a joining "and".
 - **Deterministic.** Same input and same binary give byte-identical output.
-- **Local.** One binary plus a 90 MB model file. No network at run time.
+- **Local.** One binary (12 MB) plus a 90 MB model file. No network at run time.
 
 A small neural model (all-MiniLM-L6-v2) is used, but only to turn each sentence
 into a vector for *ranking*. It never writes anything. A learned salience score,
@@ -31,8 +31,9 @@ automatically: on an M4 it embeds about twice as fast as the plain build, with
 byte-identical output. It is developed on macOS (Apple Silicon); CI also builds
 and tests on Linux, where `--features mkl` is the Intel equivalent.
 
-Input is plain text or Markdown, from a file or stdin. For PDFs, convert first:
-`pdftotext -layout paper.pdf - | distill --dehyphenate`.
+Input is plain text, Markdown or PDF, from a file or stdin. A PDF is read
+directly (`distill paper.pdf`); `distill --extract-text paper.pdf` prints the
+text it was read as. Scanned PDFs without a text layer have no text to read.
 
 ```
 distill [FILE]            summarize FILE (or stdin)
@@ -49,7 +50,8 @@ distill [FILE]            summarize FILE (or stdin)
                           ("numerous" -> "many"), only where meaning barely moves
       --no-repair         don't add context sentences
       --no-headings       don't print section headings
-      --dehyphenate       rejoin words broken across lines (PDF text)
+      --dehyphenate       rejoin words broken across lines (text already extracted from a PDF)
+      --extract-text      print the input as distill reads it (a PDF's text) and stop
   -v, --verbose           counts and timings
       --salience W        weight of the learned salience score (default 0.5, 0 = off)
       --lambda, --lead, --backward, --beta, --section-weight, --penalty, --boost
@@ -86,6 +88,16 @@ the default stays the smallest and fastest. Times are for the 1,662-word bill in
 
 ## How it works
 
+0. **Read** (`src/pdf.rs`, PDFs only). `pdf_oxide` finds the positioned text
+   lines; the reading order is worked out here. Rotated text (the arXiv margin
+   stamp), running headers and footers, page numbers and small print at the
+   bottom of a page (footnotes, affiliations) are dropped. Lines that span the
+   page's middle cut it into bands, and a band with text on both sides is read
+   as two columns, left then right. Runs of text the library splits at font
+   changes are rejoined ("BARE-generated", "Fe3O4"), citation numbers set
+   small after a word are dropped, and a word hyphenated at a line end is
+   rejoined unless the document writes it hyphenated elsewhere or both halves
+   are words it uses alone ("resource-constrained").
 1. **Segment** (`src/segment.rs`). Detects headings (Markdown, numbered,
    ALL CAPS, `SEC. 2. TITLE.`, `12. Governing Law.`), paragraphs, lists and
    sentences. The sentence splitter is rule-based with abbreviation handling
@@ -135,8 +147,19 @@ five papers submitted in the week of 3 March 2025 whose PDF has a capitalised
 and an abstract of at least 80 words. The reference summary is the abstract;
 the input is the paper's text from the Introduction heading on, so the
 abstract itself is not in it. References, captions and appendices are left
-in. Text comes from `pdftotext`. A development set of 30 more papers comes
-from the week of 3 February 2025. ROUGE is computed by `eval/score.py` with no stemming, so
+in. Text comes from distill's own PDF reader (`--extract-text`), so the
+scores are for what a user gets from `distill paper.pdf`;
+`fetch_papers.py --extractor pdftotext` gives the poppler version instead. A
+development set of 30 more papers comes from the week of 3 February 2025.
+
+The PDF reader was checked against `pdftotext` on 82 arXiv PDFs (the papers
+sets plus papers skipped by the filters): no failures, and a median F1 of
+0.979 over words of three or more letters (0.963 over word pairs, which
+also checks the order). Most of the difference is running headers, which
+`pdftotext` keeps. Summaries scored the same either way: ROUGE-2 +0.11 on the
+test papers and -0.28 on the development papers, neither significant. One
+PDF of the 82 maps its "ff" ligature to the wrong characters ("aeected"),
+for `pdftotext` as well. ROUGE is computed by `eval/score.py` with no stemming, so
 the numbers are only comparable within this table.
 
 Each set is scored twice. "N sentences" is the original setup. "ref length"
@@ -170,12 +193,12 @@ the context sentences distill adds for readability count against the budget.
 |  | ref length (599 w) | lead | 46.3 | 13.7 | 18.0 | 598 | 16.6 | 6.3 |
 |  |  | centroid | 56.4 | 22.5 | 21.8 | 596 | 20.8 | 6.8 |
 |  |  | distill | **54.0** | **19.0** | **20.8** | **597** | **18.4** | **6.8** |
-| papers (n=30) | 8 sentences | lead | 34.0 | 10.2 | 17.5 | 185 | 16.5 | 14.4 |
-|  |  | centroid | 34.5 | 8.3 | 15.7 | 261 | 18.1 | 16.8 |
-|  |  | distill | **35.3** | **8.6** | **16.3** | **211** | **15.9** | **16.7** |
-|  | ref length (194 w) | lead | 34.5 | 10.2 | 17.4 | 194 | 13.9 | 14.4 |
-|  |  | centroid | 35.3 | 8.3 | 16.3 | 193 | 12.8 | 18.4 |
-|  |  | distill | **35.2** | **8.1** | **15.9** | **192** | **12.2** | **17.7** |
+| papers (n=30) | 8 sentences | lead | 34.7 | 10.6 | 17.9 | 200 | 17.2 | 14.2 |
+|  |  | centroid | 36.2 | 8.6 | 16.5 | 243 | 18.1 | 16.1 |
+|  |  | distill | **35.5** | **9.1** | **16.8** | **192** | **15.3** | **16.2** |
+|  | ref length (194 w) | lead | 35.5 | 10.4 | 17.4 | 194 | 14.4 | 14.1 |
+|  |  | centroid | 36.0 | 8.0 | 16.5 | 192 | 12.0 | 16.3 |
+|  |  | distill | **35.1** | **8.2** | **16.2** | **192** | **11.6** | **16.6** |
 
 What this shows:
 
@@ -196,10 +219,10 @@ What this shows:
   and bills, costs a little more. The reports also arrive as one block of text
   with no headings or paragraphs, so section budgets have nothing to work with.
 - **Research papers: distill is not ahead yet.** On the 30 test papers at
-  equal length the first sentences of the introduction score best (10.2
-  ROUGE-2, against 8.1 for distill); on the 30 development papers plain
-  centroid ranking does (9.4, against 8.7). distill's picks are the plainest
-  of the three (Flesch-Kincaid grade 12.2, against 13.9 for the first
+  equal length the first sentences of the introduction score best (10.4
+  ROUGE-2, against 8.2 for distill); on the 30 development papers plain
+  centroid ranking does (8.9, against 8.4). distill's picks are the plainest
+  of the three (Flesch-Kincaid grade 11.6, against 14.4 for the first
   sentences). Part 2 of the roadmap works on this.
 - **The learned salience score** is where most of the gain comes from. Against
   the same pipeline without it, ROUGE-2 at equal length rose by 1.9 points on

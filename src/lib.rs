@@ -5,6 +5,7 @@
 pub mod compress;
 pub mod embed;
 pub mod lexical;
+pub mod pdf;
 pub mod salience;
 pub mod segment;
 pub mod select;

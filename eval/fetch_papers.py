@@ -237,7 +237,7 @@ def build(extractor):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--select", action="store_true", help="choose the papers and write eval/papers.tsv")
-    ap.add_argument("--extractor", choices=["pdftotext", "distill"], default="pdftotext")
+    ap.add_argument("--extractor", choices=["pdftotext", "distill"], default="distill")
     args = ap.parse_args()
     DATA.mkdir(exist_ok=True)
     if args.select:

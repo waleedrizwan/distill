@@ -71,7 +71,7 @@ jobs:
 
       - name: Fuzz (30 s per target)
         run: |
-          for t in compress split lexical segment select; do
+          for t in compress split lexical segment select pdf_layout; do
             mkdir -p fuzz/corpus/$t
             cargo +nightly fuzz run $t fuzz/corpus/$t samples -- -max_total_time=30 -max_len=4096 -timeout=10
           done

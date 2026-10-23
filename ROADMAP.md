@@ -259,17 +259,32 @@ judge PDF handling, structure or jargon.
 
 ## Milestone 7: native PDF input
 
-- [ ] `distill paper.pdf` works directly: the input is detected by its `%PDF`
-  header, so no `pdftotext` is needed.
-- [ ] Bake-off of pure-Rust extractors (`pdf-extract`, `pdf_oxide`), each
-  wrapped so a panic in the parser becomes an error, not a crash.
-  **Gate:** median token-level F1 against `pdftotext` of at least 0.97 on the
-  papers set, no crashes, and papers ROUGE-2 within 0.3 of the `pdftotext` path.
-  If neither passes, fall back to calling `pdftotext` when it is installed, and
-  say so.
-- [ ] Clean-up: rejoin hyphenated words, remove running headers, footers and
-  page numbers, and rejoin text that two-column layouts and line breaks split.
-  The tests use fixture PDFs.
+- [x] `distill paper.pdf` works directly: the input is detected by its `%PDF-`
+  header (`src/pdf.rs`). `--extract-text` prints the text as read.
+- [x] Bake-off on 18 arXiv PDFs, F1 against `pdftotext` over words of three or
+  more letters: `pdf-extract` 0.984 median, one panic, 92 ms; `pdf_oxide`
+  0.995, no failures, 70 ms. `pdf_oxide` won, but its own reading order swaps
+  lines and drops margin stamps into sentences, and it joins words across the
+  column gap. So it is used only for positioned lines and runs, and the
+  layout is done here; a parser panic becomes an error.
+- [x] Layout: lines split at the column gap; rotated text, running headers
+  and footers, page numbers and bottom-of-page small print dropped; columns
+  detected per band (a wide abstract above two columns is common); paragraphs
+  from line spacing, indents, short last lines and heading-like lines; runs
+  rejoined at font changes, subscripts attached, small citation numbers
+  dropped; line-end hyphens rejoined unless the document says otherwise.
+  Tests on hand-made lines, a committed two-column fixture
+  (`samples/two-column-paper.pdf`, written by `samples/make-paper-pdf.py`,
+  also in the goldens), property tests and a `pdf_layout` fuzz target: the
+  layout only reorders, joins and drops, never invents a character, and the
+  result does not depend on the order lines arrive in.
+- [x] **Gate met.** On 82 PDFs: no failures, median F1 0.979 against
+  `pdftotext` (the gate was 0.97), 0.963 over word pairs. Papers ROUGE-2
+  against the `pdftotext` path: +0.11 test, -0.28 development (gate: within
+  0.3). Summaries got plainer (FK -0.6 test, -0.8 development), because less
+  furniture reaches them. The papers sets now use this reader.
+- Not fixed: one PDF in 82 has a broken ligature map ("aeected");
+  `pdftotext` reads it the same way.
 
 ## Milestone 8: paper structure
 

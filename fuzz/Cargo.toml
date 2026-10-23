@@ -49,3 +49,10 @@ path = "fuzz_targets/select.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pdf_layout"
+path = "fuzz_targets/pdf_layout.rs"
+test = false
+doc = false
+bench = false
